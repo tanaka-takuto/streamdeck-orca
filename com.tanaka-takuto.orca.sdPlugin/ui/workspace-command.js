@@ -10,6 +10,7 @@ const save = document.getElementById("save");
 const refresh = document.getElementById("refresh");
 const message = document.getElementById("message");
 const lastResult = document.getElementById("last-result");
+const workspaceIdentity = document.getElementById("workspace-identity");
 const normalize = (value) =>
   typeof value === "string" && value.trim() ? value.trim() : "main";
 const draftTargets = new Map();
@@ -116,6 +117,7 @@ function requestView() {
   clearTimeout(pollTimer);
   requestTimer = setTimeout(() => {
     refresh.disabled = false;
+    workspaceIdentity.textContent = "対象情報の応答を確認できません。";
     showMessage(
       "状態の応答を確認できません。Orca の起動状態を確認して、状態を更新してください。",
       true,
@@ -173,11 +175,13 @@ form.addEventListener("submit", (event) => {
   }
   settings = next;
   pendingRevision = revision;
+  requestId = undefined;
   dirty = false;
   clearTimeout(requestTimer);
   clearTimeout(pollTimer);
   clearTimeout(saveTimer);
   showMessage("設定を保存しています…");
+  workspaceIdentity.textContent = "保存後に対象情報を取り直します。";
   saveTimer = setTimeout(() => {
     pendingRevision = undefined;
     showMessage(
@@ -244,6 +248,8 @@ window.connectElgatoStreamDeckSocket = (
       return;
     }
     if (
+      pendingRevision ||
+      !requestId ||
       payload.type !== "execution-view" ||
       payload.requestId !== requestId ||
       payload.controlId !== normalize(settings.controlId)
@@ -254,6 +260,10 @@ window.connectElgatoStreamDeckSocket = (
     view = payload;
     document.getElementById("workspace-name").textContent =
       payload.workspaceName;
+    const identity = payload.workspaceIdentity;
+    workspaceIdentity.textContent = identity
+      ? `プロジェクト: ${identity.projectLabel ?? (identity.project?.trim() ? identity.project : "未取得")}\nパス: ${identity.path ?? "未取得"}\nID: ${identity.id}\n短タグ: ${identity.tag}${identity.ambiguous ? "（表示重複・Orca側で対象を確認）" : ""}`
+      : "対象情報を取得できません。";
     document.getElementById("workspace-status").textContent =
       `${payload.status} · 候補 ${payload.available} 件`;
     renderTargets();
@@ -273,6 +283,7 @@ window.connectElgatoStreamDeckSocket = (
     pollTimer = setTimeout(requestView, 2_000);
   });
   socket.addEventListener("close", () => {
+    workspaceIdentity.textContent = "接続切断のため対象情報を確認できません。";
     clearTimeout(requestTimer);
     clearTimeout(pollTimer);
     clearTimeout(saveTimer);

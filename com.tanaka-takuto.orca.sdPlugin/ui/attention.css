@@ -4,11 +4,13 @@ h2 {
   margin: 0 0 10px;
 }
 #target-project {
+  white-space: pre-wrap;
   color: #b8bec6;
   font-size: 12px;
   margin: 0 0 5px;
 }
 #target-name {
+  white-space: pre-wrap;
   font-size: 18px;
   font-weight: 650;
   line-height: 1.5;
@@ -16,6 +18,7 @@ h2 {
   overflow-wrap: anywhere;
 }
 #target-path {
+  white-space: pre-wrap;
   font-size: 10px;
   color: #a1aeba;
   overflow-wrap: anywhere;

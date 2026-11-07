@@ -4,6 +4,10 @@ import {
   type WorkspaceStatus,
 } from "./orca/model";
 import type { MonitorState, WorkspaceMonitor } from "./orca/monitor";
+import {
+  type WorkspaceIdentity,
+  workspaceIdentity,
+} from "./workspace-identity";
 
 export type SavedSelection = { workspaceId: string; workspaceName: string };
 export type ControlView = {
@@ -11,6 +15,7 @@ export type ControlView = {
   workspaceId?: string;
   workspaceName: string;
   workspace?: OrcaWorkspace;
+  identity?: WorkspaceIdentity;
   status: WorkspaceStatus;
   available: number;
   index: number;
@@ -175,6 +180,11 @@ export class WorkspaceSelections {
       workspaceId: selection?.workspaceId,
       workspaceName: workspace?.name ?? selection?.workspaceName ?? "候補なし",
       workspace,
+      identity: workspaceIdentity(
+        selection?.workspaceId,
+        workspace,
+        this.catalog,
+      ),
       status:
         !this.ready || !this.state.snapshot
           ? "unknown"

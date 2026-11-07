@@ -142,3 +142,9 @@ test("初回取得中をWSなしと断定しない", () => {
   });
   assert.equal(f.nodes.get("target-reason").textContent, "候補を確認中です");
 });
+
+test("空のプロジェクトを架空のOrcaプロジェクトで補完しない", () => {
+  const f = fixture();
+  f.deliver({ ...view, current: { ...view.current, project: "" } });
+  assert.match(f.nodes.get("target-project").textContent, /未取得/u);
+});

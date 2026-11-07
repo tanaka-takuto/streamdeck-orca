@@ -99,6 +99,7 @@ button:focus-visible {
   margin: 0 0 8px;
 }
 #workspace-name {
+  white-space: pre-wrap;
   font-size: 15px;
   font-weight: 600;
   margin: 0 0 6px;
@@ -107,6 +108,14 @@ button:focus-visible {
   color: #b8bec6;
   font-size: 11px;
   margin: 0;
+}
+.identity {
+  margin: 8px 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: #c0c8d1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .connection {
   display: flex;

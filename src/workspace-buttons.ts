@@ -1,11 +1,19 @@
 import { settleDisplay } from "./display-wait";
+import { shorten, svgText, twoLines } from "./key-text";
 import type { OrcaClient } from "./orca/client";
 import { getWorkspaceStatus, type WorkspaceStatus } from "./orca/model";
 import type { MonitorState, WorkspaceMonitor } from "./orca/monitor";
+import {
+  ambiguousMessage,
+  identityLine,
+  type KeyContext,
+  workspaceIdentity,
+} from "./workspace-identity";
 
 export type WorkspaceSettings = {
   workspaceId?: string;
   workspaceName?: string;
+  controlId?: string;
 };
 export type WorkspaceKey = {
   id: string;
@@ -21,7 +29,7 @@ type Binding = {
   stop?: () => void;
   renderVersion: number;
   desiredImage?: string;
-  display?: { name: string; status: DisplayStatus };
+  display?: { name: string; status: DisplayStatus; context: KeyContext };
   busy: boolean;
   displayed: boolean;
 };
@@ -38,37 +46,34 @@ const styles: Record<
   unassigned: { color: "#30343b", symbol: "−", lines: ["候補なし"] },
 };
 
-function escapeXml(value: string): string {
-  return value.replace(
-    /[&<>"']/gu,
-    (character) =>
-      ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&apos;",
-      })[character] ?? character,
-  );
-}
-
 export function keyImage(
   name: string,
   status: DisplayStatus,
   frame = 0,
+  context?: KeyContext,
 ): string {
   const style = styles[status];
-  const title = Array.from(name).slice(0, 12).join("");
+  const [first, second] = twoLines(name);
+  const hint = context?.ambiguous
+    ? "表示重複・要照合"
+    : status === "review"
+      ? "要確認・開く"
+      : status === "unassigned"
+        ? "ダイヤルで選択"
+        : "押して開く";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
 <rect width="144" height="144" rx="16" fill="${style.color}"/>
-<g fill="#fff" font-family="sans-serif" text-anchor="middle">
-<text x="72" y="25" font-size="16">${escapeXml(title)}</text>
+<g fill="#fff" font-family="-apple-system, sans-serif" text-anchor="middle">
+${svgText(`ID ${shorten(context?.controlId || "main", 11)} · 開く`, 19, 12)}
+${svgText(identityLine(context), 35, 12)}
+${svgText(first, 57, 16)}${svgText(second, 77, 16)}
 ${
   status === "working"
-    ? `<g fill="none" stroke="#fff" stroke-width="6"><circle cx="72" cy="61" r="22" opacity="0.25"/><path d="M72 39 A22 22 0 0 1 94 61" stroke-linecap="round" transform="rotate(${(frame % 12) * 30} 72 61)"/></g>`
-    : `<text x="72" y="77" font-size="43" font-weight="bold">${style.symbol}</text>`
+    ? `<g fill="none" stroke="#fff" stroke-width="3"><circle cx="22" cy="100" r="8" opacity="0.25"/><path d="M22 92 A8 8 0 0 1 30 100" stroke-linecap="round" transform="rotate(${(frame % 12) * 30} 22 100)"/></g>`
+    : svgText(style.symbol, 108, 23, 22)
 }
-${style.lines.map((line, index) => `<text x="72" y="${style.lines.length === 1 ? 119 : 107 + index * 23}" font-size="21">${line}</text>`).join("")}
+${svgText(style.lines[0], 107, 18, 83)}
+${svgText(hint, 132, 14)}
 </g></svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
@@ -124,6 +129,14 @@ export class WorkspaceButtons {
     binding.display = {
       name: workspace?.name ?? binding.settings.workspaceName ?? "Workspace",
       status,
+      context: {
+        ...workspaceIdentity(
+          binding.settings.workspaceId,
+          workspace,
+          state.snapshot?.workspaces,
+        ),
+        controlId: binding.settings.controlId,
+      },
     };
     void this.draw(binding);
     this.updateAnimation();
@@ -165,6 +178,7 @@ export class WorkspaceButtons {
       binding.display.name,
       binding.display.status,
       this.animationFrame,
+      binding.display.context,
     );
     if (binding.desiredImage === image)
       return this.renders.get(binding.key.id) ?? Promise.resolve();
@@ -237,6 +251,7 @@ export class WorkspaceButtons {
         throw new Error(
           "ワークスペースの取得を待って、ダイヤルで表示対象を選んでください。",
         );
+      if (binding.display?.context.ambiguous) throw new Error(ambiguousMessage);
       await this.client.focusWorkspace(binding.settings.workspaceId, isCurrent);
     } catch (error) {
       if (isCurrent()) {

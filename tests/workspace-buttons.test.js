@@ -63,6 +63,97 @@ test("選択したワークスペースの入力待ちをキー画像に表示�
   assert.match(f.images.at(-1), /作業 A/u);
 });
 
+test("実一覧からキーへプロジェクトと短タグを渡し、対象消失でプロジェクトを取得済みとしない", async () => {
+  const f = fixture();
+  f.buttons.bind(f.key, { workspaceId: "a", workspaceName: "main" });
+  f.emit(
+    snapshot([{ ...workspace("a", "main", "waiting"), project: "sateto" }]),
+  );
+  await tick();
+  assert.match(f.images.at(-1), /sateto/u);
+  const { workspaceTag } = await loadModule("src/attention-image.ts");
+  assert.ok(f.images.at(-1).includes(workspaceTag("a")));
+  f.emit({ snapshot: null, error: "offline" });
+  await tick();
+  assert.doesNotMatch(f.images.at(-1), /sateto/u);
+  assert.ok(f.images.at(-1).includes(workspaceTag("a")));
+  assert.match(f.images.at(-1), /状態不明/u);
+});
+
+test("短タグ衝突と同名が重なる既知一覧では、状態キーに照合を促して移動しない", async () => {
+  const opens = [];
+  const f = fixture({
+    async focusWorkspace(id) {
+      opens.push(id);
+      return true;
+    },
+  });
+  const ids = ["collision-11vsk8p-13317", "collision-1c0e837-25368"];
+  f.buttons.bind(f.key, { workspaceId: ids[0], workspaceName: "main" });
+  f.emit(
+    snapshot(
+      ids.map((id) => ({ ...workspace(id, "main", "waiting"), project: "P" })),
+    ),
+  );
+  await tick();
+  assert.match(f.images.at(-1), /表示重複/u);
+  await f.buttons.press(f.key.id);
+  assert.deepEqual(opens, []);
+  assert.match(f.errors[0]?.error ?? "", /完全ID.*パス/u);
+});
+
+test("XML除去される文字だけが違う同タグの名前でも、状態キーから移動しない", async () => {
+  const opens = [];
+  const f = fixture({
+    async focusWorkspace(id) {
+      opens.push(id);
+      return true;
+    },
+  });
+  const ids = ["collision-11vsk8p-13317", "collision-1c0e837-25368"];
+  f.buttons.bind(f.key, { workspaceId: ids[0] });
+  f.emit(
+    snapshot(
+      ids.map((id, i) => ({
+        ...workspace(id, i ? "ma\u0001in" : "main", "waiting"),
+        project: "P",
+      })),
+    ),
+  );
+  await tick();
+  await f.buttons.press(f.key.id);
+  assert.deepEqual(opens, []);
+});
+
+for (const names of [
+  ["a b", "a  b"],
+  ["e\u0301", "é"],
+]) {
+  test(`表示用正規化で同じになる${JSON.stringify(names)}の同タグ対象へ状態キーで移動しない`, async () => {
+    const opens = [];
+    const f = fixture({
+      async focusWorkspace(id) {
+        opens.push(id);
+        return true;
+      },
+    });
+    const ids = ["collision-11vsk8p-13317", "collision-1c0e837-25368"];
+    f.buttons.bind(f.key, { workspaceId: ids[0] });
+    f.emit(
+      snapshot(
+        ids.map((id, i) => ({
+          ...workspace(id, names[i], "waiting"),
+          project: "P",
+        })),
+      ),
+    );
+    await tick();
+    await f.buttons.press(f.key.id);
+    assert.deepEqual(opens, []);
+    assert.match(f.images.at(-1), /表示重複/u);
+  });
+}
+
 test("一覧順が変わっても固定 ID を維持し、消失時は不明を表示する", async () => {
   const selected = [];
   const f = fixture({

@@ -5,22 +5,36 @@
     {
       "key": "title",
       "type": "text",
-      "rect": [12, 7, 176, 20],
-      "font": { "size": 13 },
+      "rect": [12, 4, 176, 18],
+      "font": { "size": 12 },
       "alignment": "left"
     },
     {
       "key": "workspace",
       "type": "text",
-      "rect": [12, 33, 176, 30],
-      "font": { "size": 18, "weight": 600 },
+      "rect": [12, 24, 176, 21],
+      "font": { "size": 16, "weight": 600 },
+      "alignment": "left"
+    },
+    {
+      "key": "workspace2",
+      "type": "text",
+      "rect": [12, 45, 176, 21],
+      "font": { "size": 16, "weight": 600 },
+      "alignment": "left"
+    },
+    {
+      "key": "identity",
+      "type": "text",
+      "rect": [12, 66, 176, 16],
+      "font": { "size": 12 },
       "alignment": "left"
     },
     {
       "key": "position",
       "type": "text",
-      "rect": [12, 72, 176, 20],
-      "font": { "size": 13 },
+      "rect": [12, 84, 176, 14],
+      "font": { "size": 12 },
       "alignment": "right"
     }
   ]

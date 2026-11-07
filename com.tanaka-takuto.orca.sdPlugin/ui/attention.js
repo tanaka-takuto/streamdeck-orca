@@ -41,7 +41,12 @@ function requestView() {
 }
 function render(v) {
   const c = v.current;
-  write("target-project", c ? `${c.project || "Orca"} · ${c.tag || ""}` : "");
+  write(
+    "target-project",
+    c
+      ? `${c.projectLabel ?? (c.project?.trim() ? c.project : "未取得")} · ${c.tag || ""}`
+      : "",
+  );
   write(
     "target-name",
     c?.name ||
@@ -51,7 +56,12 @@ function render(v) {
           ? "取得しています…"
           : "候補なし"),
   );
-  write("target-path", c?.path || "");
+  write(
+    "target-path",
+    c
+      ? `${c.path || "パス未取得"}\nID: ${c.id || "未取得"}${c.ambiguous ? "\n表示重複・Orca側で対象を確認してください" : ""}`
+      : "",
+  );
   write(
     "target-reason",
     c

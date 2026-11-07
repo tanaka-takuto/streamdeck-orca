@@ -1,11 +1,16 @@
 import type { OrcaAgent, OrcaSnapshot, OrcaWorkspace } from "./orca/model";
 import type { MonitorState } from "./orca/monitor";
+import {
+  type WorkspaceIdentity,
+  workspaceIdentity,
+} from "./workspace-identity";
 
 export type AttentionKind = "waiting" | "review";
 export type AttentionCandidate = {
   workspace: OrcaWorkspace;
   kind: AttentionKind;
   signals: OrcaAgent[];
+  identity?: WorkspaceIdentity;
 };
 export type AttentionTarget = {
   runtimeId: string;
@@ -146,7 +151,14 @@ export class AttentionQueue {
     const candidates = snapshot.workspaces
       .flatMap((w) => {
         const c = candidate(w);
-        return c ? [c] : [];
+        return c
+          ? [
+              {
+                ...c,
+                identity: workspaceIdentity(w.id, w, snapshot.workspaces),
+              },
+            ]
+          : [];
       })
       .sort(
         (a, b) =>

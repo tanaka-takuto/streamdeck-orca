@@ -13,6 +13,12 @@
       <p class="eyebrow">ORCA / ACTION</p>
       <h1>コマンド・AI指示</h1>
       <p class="description">同じ操作 ID で選んだワークスペースに対して、実機のキーを押したときに実行します。</p>
+      <section class="selection" aria-label="現在の実行先">
+        <p class="selection-label">操作 ID で選択中の対象</p>
+        <p id="workspace-name">取得しています…</p>
+        <p id="workspace-identity" class="identity">対象情報を取得しています…</p>
+        <p id="workspace-status"></p>
+      </section>
       <form id="command-form">
         <label for="control-id">操作 ID</label>
         <input id="control-id" type="text" value="main" autocomplete="off" disabled />
@@ -38,11 +44,6 @@
         <p id="mode-help" class="hint">コマンドごとに新しい実行用ターミナルを開きます。</p>
         <div class="save-row"><button id="save" type="submit" disabled>保存</button></div>
       </form>
-      <section class="selection" aria-label="現在の実行先">
-        <p class="selection-label">現在のワークスペース</p>
-        <p id="workspace-name">取得しています…</p>
-        <p id="workspace-status"></p>
-      </section>
       <div class="connection">
         <p id="message" role="status" aria-live="polite">Stream Deck に接続しています…</p>
         <button id="refresh" type="button" disabled>状態を更新</button>

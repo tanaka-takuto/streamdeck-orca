@@ -20,7 +20,62 @@ const state = (workspaces = [w()], runtimeId = "r1") => ({
 const flush = async () => {
   await new Promise((resolve) => setImmediate(resolve));
 };
-function fixture() {
+
+test("確認先でも同名・同タグの対象を黙って開かず、完全IDでの確認へ案内する", async () => {
+  const f = fixture();
+  f.set(
+    state(
+      ["collision-11vsk8p-13317", "collision-1c0e837-25368"].map((id) => ({
+        ...w(id),
+        name: "main",
+      })),
+    ),
+  );
+  await flush();
+  await f.buttons.press("key");
+  assert.deepEqual(f.opens, []);
+  assert.match(f.errors[0] ?? "", /完全ID.*パス/u);
+  assert.match(decodeURIComponent(f.images.at(-1)), /表示重複/u);
+});
+
+test("空プロジェクトの代替表示が同名・同タグと重なるときも確認先を開かない", async () => {
+  const f = fixture();
+  f.set(
+    state(
+      ["collision-11vsk8p-13317", "collision-1c0e837-25368"].map((id, i) => ({
+        ...w(id),
+        name: "main",
+        project: i ? "未取得" : "",
+      })),
+    ),
+  );
+  await flush();
+  await f.buttons.press("key");
+  assert.deepEqual(f.opens, []);
+  assert.match(f.errors[0] ?? "", /重複/u);
+});
+
+for (const names of [
+  ["a b", "a  b"],
+  ["e\u0301", "é"],
+]) {
+  test(`確認先も正規化で同じになる${JSON.stringify(names)}を同じ表示として拒否する`, async () => {
+    const f = fixture();
+    f.set(
+      state(
+        ["collision-11vsk8p-13317", "collision-1c0e837-25368"].map((id, i) => ({
+          ...w(id),
+          name: names[i],
+        })),
+      ),
+    );
+    await flush();
+    await f.buttons.press("key");
+    assert.deepEqual(f.opens, []);
+    assert.match(f.errors[0] ?? "", /重複/u);
+  });
+}
+function fixture(options = {}) {
   let listener;
   let next = state();
   const monitor = {
@@ -64,6 +119,7 @@ function fixture() {
     },
     async showAlert() {
       alerts++;
+      await options.alert?.();
     },
   });
   return {
@@ -72,6 +128,9 @@ function fixture() {
     opens,
     errors,
     client,
+    next(value) {
+      next = value;
+    },
     set(value) {
       next = value;
       listener?.(next);
@@ -84,6 +143,31 @@ function fixture() {
     },
   };
 }
+
+test("候補を保持した押下が取得失敗しても、短い失敗見出しと確認案内を表示し復旧で自動移動しない", async (t) => {
+  let finishAlert;
+  const f = fixture({
+    alert: () =>
+      new Promise((resolve) => {
+        finishAlert = resolve;
+      }),
+  });
+  t.after(() => finishAlert?.());
+  await flush();
+  f.next({ snapshot: null, error: "offline" });
+  const press = f.buttons.press("key");
+  await flush();
+  const visible = decodeURIComponent(f.images.at(-1));
+  assert.match(visible, />取得できません<\/text>/u);
+  assert.match(visible, /Orcaで確認/u);
+  assert.doesNotMatch(visible, /開いています/u);
+  assert.deepEqual(f.opens, []);
+  finishAlert();
+  await press;
+  f.set(state());
+  await flush();
+  assert.deepEqual(f.opens, []);
+});
 
 test("同じ見た目で新しい待ちが来ても、次の押下は最新エピソードを固定できる", async () => {
   const f = fixture();

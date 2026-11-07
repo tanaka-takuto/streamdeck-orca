@@ -2,6 +2,7 @@ import streamDeck, { type DialAction } from "@elgato/streamdeck";
 import { AttentionButtons } from "./attention-buttons";
 import { commandImage } from "./command-image";
 import { settleDisplay } from "./display-wait";
+import { shorten, twoLines } from "./key-text";
 import { createCliRunner, OrcaClient } from "./orca/client";
 import {
   type AgentDirectory,
@@ -11,6 +12,11 @@ import {
 } from "./orca/execution";
 import { WorkspaceMonitor } from "./orca/monitor";
 import { WorkspaceButtons, type WorkspaceKey } from "./workspace-buttons";
+import {
+  ambiguousMessage,
+  identityLine,
+  type WorkspaceIdentity,
+} from "./workspace-identity";
 import {
   type ControlView,
   normalizeControlId,
@@ -41,6 +47,8 @@ type ExecutionRecord = {
   busy: boolean;
   workspaceId?: string;
   workspaceName?: string;
+  workspaceIdentity?: WorkspaceIdentity;
+  controlId?: string;
   command?: ExecutionSettings;
   result?: ExecutionResult;
 };
@@ -155,6 +163,7 @@ class WorkspaceService {
       this.buttons.bind(key, {
         workspaceId: view.workspaceId,
         workspaceName: view.workspaceName,
+        controlId: binding.controlId,
       });
     });
   }
@@ -171,6 +180,7 @@ class WorkspaceService {
       const rendered = JSON.stringify([
         view.controlId,
         view.workspaceName,
+        view.identity,
         view.status,
         view.available,
         view.index,
@@ -187,8 +197,12 @@ class WorkspaceService {
           )
             return;
           await dial.setFeedback({
-            title: `${view.controlId} · ${labels[view.status]}`,
-            workspace: view.workspaceName,
+            title: `${shorten(view.controlId, 15)} · ${labels[view.status]}`,
+            workspace: twoLines(view.workspaceName, 20)[0],
+            workspace2: twoLines(view.workspaceName, 20)[1],
+            identity: view.identity?.ambiguous
+              ? "表示重複・詳細で照合"
+              : identityLine(view.identity),
             position: view.available
               ? `${view.index >= 0 ? view.index + 1 : "—"} / ${view.available}`
               : "候補なし",
@@ -284,6 +298,14 @@ class WorkspaceService {
         (displayCommand.mode === "ai" ? "AIへ指示" : "コマンド実行"),
       displayCommand.mode ?? "shell",
       phase,
+      {
+        ...(record?.busy
+          ? (record.workspaceIdentity ?? view.identity)
+          : view.identity),
+        controlId: record?.busy
+          ? (record.controlId ?? binding.controlId)
+          : binding.controlId,
+      },
     );
     const renderKey = JSON.stringify([image, displayedWorkspaceId]);
     if (binding.lastSelection === renderKey) return;
@@ -345,6 +367,8 @@ class WorkspaceService {
     record.result = undefined;
     record.workspaceId = undefined;
     record.workspaceName = undefined;
+    record.workspaceIdentity = undefined;
+    record.controlId = binding.controlId;
     record.command = binding.command;
     this.renderCommand(binding, this.selections.view(binding.controlId));
     try {
@@ -365,6 +389,7 @@ class WorkspaceService {
       const view = this.selections.view(binding.controlId);
       if (!view.workspaceId)
         throw new Error("ダイヤルで対象ワークスペースを選んでください。");
+      if (view.identity?.ambiguous) throw new Error(ambiguousMessage);
       if (waitForSelection) {
         while (
           this.bindings.get(actionId) === binding &&
@@ -401,6 +426,7 @@ class WorkspaceService {
       }
       record.workspaceId = view.workspaceId;
       record.workspaceName = view.workspaceName;
+      record.workspaceIdentity = view.identity;
       const current = () =>
         this.bindings.get(actionId) === binding &&
         sameSelection() &&
@@ -500,6 +526,7 @@ class WorkspaceService {
       controlId: view.controlId,
       workspaceId: view.workspaceId,
       workspaceName: view.workspaceName,
+      workspaceIdentity: view.identity,
       status: labels[view.status],
       available: view.available,
       targets: directory?.targets ?? [],
@@ -632,6 +659,7 @@ class WorkspaceService {
       requestId,
       controlId: view.controlId,
       workspaceName: view.workspaceName,
+      workspaceIdentity: view.identity,
       status: labels[view.status],
       available: view.available,
       error: view.error,

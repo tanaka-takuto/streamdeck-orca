@@ -3,6 +3,7 @@ const apply = document.getElementById("apply");
 const message = document.getElementById("message");
 const workspaceName = document.getElementById("workspace-name");
 const workspaceStatus = document.getElementById("workspace-status");
+const workspaceIdentity = document.getElementById("workspace-identity");
 const refresh = document.getElementById("refresh");
 let socket;
 let inspectorId;
@@ -45,6 +46,7 @@ function requestView() {
   requestTimer = setTimeout(() => {
     refresh.disabled = false;
     workspaceStatus.textContent = "状態不明";
+    workspaceIdentity.textContent = "対象情報の応答を確認できません。";
     showMessage(
       "応答を確認できません。Orca の起動状態を確認して、状態を更新してください。",
       true,
@@ -68,6 +70,7 @@ document.getElementById("control-form").addEventListener("submit", (event) => {
   requestId = undefined;
   workspaceName.textContent = "設定を保存しています…";
   workspaceStatus.textContent = "";
+  workspaceIdentity.textContent = "保存後に対象情報を取り直します。";
   showMessage("設定を保存しています…");
   requestTimer = setTimeout(() => {
     showMessage(
@@ -132,6 +135,8 @@ window.connectElgatoStreamDeckSocket = (
       return;
     }
     if (
+      pendingControlId !== undefined ||
+      !requestId ||
       payload.type !== "control-view" ||
       payload.requestId !== requestId ||
       payload.controlId !== normalize(settings.controlId)
@@ -140,6 +145,10 @@ window.connectElgatoStreamDeckSocket = (
     clearTimeout(requestTimer);
     refresh.disabled = false;
     workspaceName.textContent = payload.workspaceName;
+    const identity = payload.workspaceIdentity;
+    workspaceIdentity.textContent = identity
+      ? `プロジェクト: ${identity.projectLabel ?? (identity.project?.trim() ? identity.project : "未取得")}\nパス: ${identity.path ?? "未取得"}\nID: ${identity.id}\n短タグ: ${identity.tag}${identity.ambiguous ? "（表示重複・Orca側で対象を確認）" : ""}`
+      : "対象情報を取得できません。";
     workspaceStatus.textContent = `${payload.status} · 候補 ${payload.available} 件`;
     showMessage(
       payload.error ||
@@ -155,6 +164,7 @@ window.connectElgatoStreamDeckSocket = (
     controlInput.disabled = true;
     apply.disabled = true;
     workspaceStatus.textContent = "状態不明";
+    workspaceIdentity.textContent = "接続切断のため対象情報を確認できません。";
     showMessage(
       "Stream Deck との接続が切れました。アクションを選び直してください。",
       true,

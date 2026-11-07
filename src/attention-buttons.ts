@@ -9,6 +9,11 @@ import { attentionImage, displayName, workspaceTag } from "./attention-image";
 import type { OrcaClient } from "./orca/client";
 import type { WorkspaceMonitor } from "./orca/monitor";
 import type { WorkspaceKey } from "./workspace-buttons";
+import {
+  ambiguousMessage,
+  projectLabel,
+  workspaceIdentity,
+} from "./workspace-identity";
 
 type Binding = {
   key: WorkspaceKey;
@@ -112,6 +117,14 @@ export class AttentionButtons {
       if (!state.snapshot || state.fromCache)
         throw new Error(state.error ?? "最新の状態を取得できません。");
       if (!target) return; // 初回/空表示の押下は再取得のみ。新たに現れた候補は開かない。
+      if (
+        workspaceIdentity(
+          target.workspaceId,
+          state.snapshot.workspaces.find((w) => w.id === target.workspaceId),
+          state.snapshot.workspaces,
+        )?.ambiguous
+      )
+        throw new Error(ambiguousMessage);
       if (!matchesAttentionTarget(state.snapshot, target)) {
         this.result = {
           workspaceName: name,
@@ -178,10 +191,13 @@ export class AttentionButtons {
       current: w
         ? {
             name: w.name,
+            id: w.id,
             project: w.project,
+            projectLabel: projectLabel(w.project),
             path: w.path,
             displayName: displayName(v),
             tag: workspaceTag(w.id),
+            ambiguous: v.current?.identity?.ambiguous ?? false,
             kind: v.current?.kind,
             working: w.agents.some((a) => a.state === "working"),
           }
