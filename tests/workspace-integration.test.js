@@ -43,13 +43,21 @@ const info = {
   ],
 };
 
-test("専用キーは画面の選択中 AI に入力し、保存時は入力せず、Enter は設定時だけ送る", {
+test("専用キーは表示済み AI に入力し、保存や選択変更だけでは入力しない", {
   skip: process.platform === "win32",
 }, async (t) => {
   const f = await fixture(t);
   f.setActiveSelection("a");
-  f.appear("input", "active", "unused", { body: "入力だけ" });
-  await f.wait((m) => m.event === "setImage" && m.context === "input");
+  f.appear("input", "active", "unused", {
+    body: "入力だけ",
+    recipientMode: "displayed-v1",
+  });
+  await f.wait(
+    (m) =>
+      m.event === "setImage" &&
+      m.context === "input" &&
+      decodeURIComponent(m.payload.image).includes("押して入力"),
+  );
   assert.deepEqual(f.executions(), []);
   f.setActiveSelection("b");
   f.send("keyDown", "input", "active");
@@ -60,7 +68,7 @@ test("専用キーは画面の選択中 AI に入力し、保存時は入力せ�
       "terminal",
       "send",
       "--terminal",
-      "fresh-b",
+      "fresh-a",
       "--text",
       "入力だけ",
       "--json",
@@ -68,16 +76,28 @@ test("専用キーは画面の選択中 AI に入力し、保存時は入力せ�
   ]);
   const start = f.history.length;
   f.send("didReceiveSettings", "input", "active", {
-    settings: { body: "送信する", enter: true },
+    settings: { body: "送信する", enter: true, recipientMode: "displayed-v1" },
   });
   f.setActiveSelection("a");
+  const preview = await f.wait(
+    (m) =>
+      m.event === "setImage" &&
+      m.context === "input" &&
+      decodeURIComponent(m.payload.image).includes("入力＋Enter") &&
+      decodeURIComponent(m.payload.image).includes("押して入力"),
+    start,
+  );
+  const displayedA = decodeURIComponent(preview.payload.image).includes(
+    ">A</text>",
+  );
+  f.setActiveSelection(displayedA ? "b" : "a");
   f.send("keyDown", "input", "active");
   await f.wait((m) => m.event === "showOk" && m.context === "input", start);
   assert.deepEqual(f.executions().at(-1), [
     "terminal",
     "send",
     "--terminal",
-    "fresh-a",
+    displayedA ? "fresh-a" : "fresh-b",
     "--text",
     "送信する",
     "--enter",
@@ -129,7 +149,7 @@ if (args[0] === 'status') console.log(JSON.stringify({ok:true,_meta:data._meta,r
 else if (args[0] === 'worktree') setTimeout(() => console.log(JSON.stringify(data)), data.testDelayMs || 0);
 else if (args[1] === 'list') {
  const id = args[args.indexOf('--worktree') + 1].slice(3);
- console.log(JSON.stringify({ok:true,_meta:data._meta,result:{hostScope:{hostIds:['local'],omittedHostIds:[]},truncated:false,terminals:[{handle:'fresh-'+id,incarnationId:'inc-'+id,agentIdentity:'codex',title:'Codex '+id,worktreeId:id,tabId:'tab',leafId:id,executionHostId:'local',connected:true,writable:true,orphaned:false}]}}));
+ console.log(JSON.stringify({ok:true,_meta:data._meta,result:{hostScope:{hostIds:['local'],omittedHostIds:[]},truncated:false,topologyRevisions:{[id]:1},visualLayouts:[{worktreeId:id,root:{type:'group',tabs:[{tabId:'tab',panes:{type:'terminal',handle:'fresh-'+id,tabId:'tab',leafId:id}}]}}],terminals:[{handle:'fresh-'+id,incarnationId:'inc-'+id,agentIdentity:'codex',title:'Codex '+id,worktreeId:id,tabId:'tab',leafId:id,executionHostId:'local',connected:true,writable:true,orphaned:false}]}}));
 } else if (args[1] === 'switch') {
  fs.appendFileSync(${JSON.stringify(switchesPath)}, JSON.stringify(args)+'\\n');
  console.log(JSON.stringify({ok:true,_meta:data._meta,result:{focus:{navigated:true}}}));

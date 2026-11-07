@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Orca アクティブAIに入力</title>
+    <title>Orca 表示AIへ入力</title>
     <link rel="stylesheet" href="workspace-status.css" />
     <link rel="stylesheet" href="workspace-command.css" />
     <script src="active-ai-input.js" defer></script>
@@ -11,8 +11,14 @@
   <body>
     <main>
       <p class="eyebrow">ORCA / INPUT</p>
-      <h1>アクティブAIに入力</h1>
-      <p class="description">Orca で選択中の AI ターミナルに、登録した文字列を追加入力します。ダイヤルや操作 ID の設定は不要です。</p>
+      <h1>表示AIへ入力</h1>
+      <p class="description">キーに表示されたワークスペースの AI に追加入力します。Orca の保存選択を表示候補として使い、押下時は表示した相手を固定します。切り替え直後はキーの宛先を確認してください。</p>
+      <section class="selection" aria-label="キーの表示先">
+        <p class="selection-label">キーの表示先</p>
+        <p id="recipient" style="white-space:pre-wrap;overflow-wrap:anywhere">表示先を取得しています…</p>
+        <details><summary>完全な識別情報</summary><p id="recipient-details" style="white-space:pre-wrap;overflow-wrap:anywhere"></p></details>
+      </section>
+      <p class="hint">位置は Orca が返す端末一覧上の照合補助です。停止・未接続のペインやグループが省かれ、画面配置と異なる場合があります。同名AIを見分けられないときはキーを押さず、Orca側で入力してください。</p>
       <form id="command-form">
         <label for="label">ボタンの表示名</label>
         <input id="label" type="text" maxlength="40" placeholder="例: 続けて、レビュー" disabled />
@@ -20,16 +26,18 @@
         <textarea id="body" rows="6" maxlength="16000" spellcheck="false" placeholder="例: その方針で続けてください" disabled></textarea>
         <label class="checkbox-row" for="enter"><input id="enter" type="checkbox" disabled />Enterも送る</label>
         <p class="hint">オフなら入力のみ。複数行はペーストとして入力します。オンなら入力後に Enter を送ります。</p>
+        <label class="checkbox-row" for="recipient-mode"><input id="recipient-mode" type="checkbox" disabled />表示先を確認して入力する動作を有効にする</label>
+        <p class="hint">以前の「アクティブAIに入力」と同じキーです。本文と Enter 設定は保持しています。チェックして保存するまで入力しません。</p>
         <div class="save-row"><button id="save" type="submit" disabled>保存</button></div>
       </form>
       <p id="message" role="status" aria-live="polite">Stream Deck に接続しています…</p>
       <section class="selection" aria-label="直近のキー操作">
         <p class="selection-label">直近のキー操作</p>
-        <p id="last-result" role="status">まだ入力していません。</p>
+        <p id="last-result" role="status">このプラグイン起動中の記録はありません。過去の未入力を示すものではありません。</p>
       </section>
-      <p class="note">既存の入力は消しません。Enter を送る場合は既存の入力も含めて送信します。入力先の AI ターミナルを Orca で選択してからキーを押してください。</p>
+      <p class="note">既存の入力は消しません。Enter を送る場合は既存の入力も含めて送信します。入力先をキーで確認してから押してください。</p>
       <p class="note">現在は macOS / Linux のローカル AI ターミナルが対象です。ネイティブ Chat は対象外です。</p>
-      <p class="note">Orca の保存済みの選択状態を参照します。ワークスペースやペインの切り替え直後は反映が遅れる場合があるため、少し待ってから押してください。</p>
+      <p class="note">端末位置の T は端末レイアウト内のタブ順です。ファイルやブラウザを含む全タブ番号ではありません。保存選択は現在の画面選択を保証しません。結果不明時は Orca で確認し、必要な場合だけキーを押し直してください。</p>
     </main>
   </body>
 </html>

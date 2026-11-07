@@ -8,6 +8,7 @@ import {
   readResponse,
 } from "./model";
 import { ShellCompletion } from "./shell-completion";
+import { terminalLocations } from "./terminal-location";
 
 export type AgentSelection = {
   handle: string;
@@ -19,6 +20,7 @@ export type AgentTarget = AgentSelection & {
   name: string;
   identity: string;
   paneKey?: string;
+  location?: string;
 };
 export type ExecutionSettings = {
   mode?: "shell" | "ai";
@@ -38,6 +40,9 @@ export type AgentDirectory = {
   workspaceId: string;
   runtimeId: string;
   targets: AgentTarget[];
+  workspace: OrcaWorkspace;
+  snapshot: OrcaSnapshot;
+  topologyRevision?: number;
 };
 
 export class WorkspaceExecutor {
@@ -65,6 +70,7 @@ export class WorkspaceExecutor {
   private async directory(
     snapshot: OrcaSnapshot,
     workspace: OrcaWorkspace,
+    includeLocations = false,
   ): Promise<AgentDirectory> {
     const response = readResponse(
       await this.run([
@@ -72,6 +78,7 @@ export class WorkspaceExecutor {
         "list",
         "--worktree",
         `id:${workspace.id}`,
+        ...(includeLocations ? ["--include-visual-layouts"] : []),
         "--limit",
         "200",
         "--json",
@@ -88,6 +95,9 @@ export class WorkspaceExecutor {
     )
       throw new Error("AI の送信先一覧を確認できません。");
     const targets: AgentTarget[] = [];
+    const locations = includeLocations
+      ? terminalLocations(response.result.visualLayouts, workspace.id)
+      : undefined;
     for (const value of response.result.terminals) {
       const row = object(value);
       if (
@@ -117,18 +127,30 @@ export class WorkspaceExecutor {
           typeof row.title === "string" && row.title
             ? row.title
             : row.agentIdentity,
+        location:
+          locations?.get(row.handle)?.paneKey === `${row.tabId}:${row.leafId}`
+            ? locations?.get(row.handle)?.location
+            : undefined,
       });
     }
     return {
       workspaceId: workspace.id,
       runtimeId: response.runtimeId,
       targets,
+      workspace,
+      snapshot,
+      topologyRevision: includeLocations
+        ? (object(response.result.topologyRevisions)[workspace.id] as number)
+        : undefined,
     };
   }
 
-  async agents(workspaceId: string): Promise<AgentDirectory> {
+  async agents(
+    workspaceId: string,
+    includeLocations = false,
+  ): Promise<AgentDirectory> {
     const { snapshot, workspace } = await this.workspace(workspaceId);
-    return await this.directory(snapshot, workspace);
+    return await this.directory(snapshot, workspace, includeLocations);
   }
 
   async execute(

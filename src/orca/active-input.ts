@@ -1,17 +1,50 @@
+import { locationFitsKey } from "../recipient-label";
+import {
+  type WorkspaceIdentity,
+  workspaceIdentity,
+} from "../workspace-identity";
+import type { ActiveSelection } from "./active-selection";
 import {
   type ActiveSelectionReader,
   createActiveSelectionReader,
 } from "./active-selection";
 import type { CliRunner, OrcaClient } from "./client";
+import type { AgentTarget } from "./execution";
 import { type ExecutionResult, WorkspaceExecutor } from "./execution";
+import type { OrcaWorkspace } from "./model";
 import { object, readResponse } from "./model";
 
 export type ActiveInputSettings = {
   body?: string;
   label?: string;
   enter?: boolean;
+  recipientMode?: "displayed-v1";
 };
 
+export type ActiveRecipient = {
+  selection: ActiveSelection;
+  target: AgentTarget;
+  workspace: OrcaWorkspace;
+  context: WorkspaceIdentity;
+  location: string;
+  topologyRevision: number;
+};
+export const recipientSignature = (r: ActiveRecipient) =>
+  JSON.stringify([
+    r.selection.runtimeId,
+    r.workspace.id,
+    r.workspace.hostId,
+    r.target.handle,
+    r.target.incarnationId,
+    r.target.identity,
+    r.target.paneKey,
+    r.location,
+    r.topologyRevision,
+    r.workspace.name,
+    r.workspace.project,
+    r.workspace.path,
+    r.target.name,
+  ]);
 export class ActiveAiInput {
   private readonly executor: WorkspaceExecutor;
   constructor(
@@ -34,7 +67,7 @@ export class ActiveAiInput {
       throw new Error(
         "Orca のデスクトップ画面で入力先の AI ターミナルを選択してください。",
       );
-    const directory = await this.executor.agents(selection.workspaceId);
+    const directory = await this.executor.agents(selection.workspaceId, true);
     if (directory.runtimeId !== selection.runtimeId)
       throw new Error(
         "Orca の実行環境が変わりました。入力先を確認してください。",
@@ -46,11 +79,39 @@ export class ActiveAiInput {
       throw new Error(
         "選択中のペインに入力可能な AI がいません。Orca で AI ターミナルを選択してください。",
       );
-    return { selection, target: matches[0] };
+    const target = matches[0];
+    if (!locationFitsKey(target.location))
+      throw new Error(
+        "端末位置が複雑でキーに完全表示できません。Orca側で入力してください。",
+      );
+    const context = workspaceIdentity(
+      directory.workspace.id,
+      directory.workspace,
+      directory.snapshot.workspaces,
+    );
+    if (
+      directory.snapshot.truncated ||
+      directory.snapshot.omittedHosts ||
+      !context ||
+      context.ambiguous ||
+      directory.workspace.hostId !== "local" ||
+      !target.location ||
+      !Number.isSafeInteger(directory.topologyRevision)
+    )
+      throw new Error("表示するAIのワークスペースと端末位置を確認できません。");
+    return {
+      selection,
+      target,
+      workspace: directory.workspace,
+      context,
+      location: target.location,
+      topologyRevision: directory.topologyRevision as number,
+    };
   }
 
   async send(
     settings: ActiveInputSettings,
+    displayed: ActiveRecipient,
     isCurrent = () => true,
   ): Promise<ExecutionResult> {
     const cancelled: ExecutionResult = {
@@ -77,16 +138,48 @@ export class ActiveAiInput {
       throw new Error(
         "入力する文字列を1〜16000文字で設定してください。制御文字は使用できません。",
       );
-    const { selection, target } = await this.resolve();
-    if (!isCurrent()) return cancelled;
-    const current = await this.readActive();
+    if (!displayed) throw new Error("表示済みの入力先を確認してください。");
+    const directory = await this.executor.agents(displayed.workspace.id, true);
+    const context = workspaceIdentity(
+      directory.workspace.id,
+      directory.workspace,
+      directory.snapshot.workspaces,
+    );
+    const target = directory.targets.filter(
+      (row) => row.handle === displayed.target.handle,
+    );
+    if (target.length !== 1)
+      throw new Error("表示したAIを一意に取得できません。");
+    const chosen = target[0];
+    if (!locationFitsKey(chosen.location))
+      throw new Error(
+        "端末位置をキーに完全表示できません。入力していません。Orca側で確認してください。",
+      );
     if (
-      !isCurrent() ||
-      current.runtimeId !== selection.runtimeId ||
-      current.workspaceId !== selection.workspaceId ||
-      current.paneKey !== selection.paneKey
+      !chosen ||
+      !context ||
+      context.ambiguous ||
+      directory.snapshot.truncated ||
+      directory.snapshot.omittedHosts ||
+      directory.workspace.hostId !== "local" ||
+      !chosen.location ||
+      !Number.isSafeInteger(directory.topologyRevision)
     )
-      return cancelled;
+      throw new Error("表示したAIを確認できません。入力していません。");
+    const selection = displayed.selection;
+    const fresh = {
+      selection: { ...selection, runtimeId: directory.runtimeId },
+      target: chosen,
+      workspace: directory.workspace,
+      context,
+      location: chosen.location,
+      topologyRevision: directory.topologyRevision as number,
+    };
+    if (recipientSignature(fresh) !== recipientSignature(displayed))
+      throw new Error(
+        "表示したAIや端末位置が変わりました。表示を確認して押し直してください。",
+      );
+    if (!isCurrent()) return cancelled;
     const enter = settings.enter === true;
     // 生の改行が実行キーになるのを避け、入力のみの複数行は bracketed paste として渡す。
     const text =
@@ -99,7 +192,7 @@ export class ActiveAiInput {
           "terminal",
           "send",
           "--terminal",
-          target.handle,
+          chosen.handle,
           "--text",
           text,
           ...(enter ? ["--enter"] : []),
@@ -108,7 +201,7 @@ export class ActiveAiInput {
       );
       if (response.runtimeId !== selection.runtimeId) throw new Error();
       const send = object(response.result.send);
-      if (send.handle !== target.handle) throw new Error();
+      if (send.handle !== chosen.handle) throw new Error();
       if (send.accepted === false)
         return {
           status: "refused",
@@ -118,7 +211,7 @@ export class ActiveAiInput {
       if (!enter)
         return {
           status: "accepted",
-          handle: target.handle,
+          handle: chosen.handle,
           message: "文字列の入力受付を確認しました。Enter は送っていません。",
         };
       const prompt = object(send.prompt);
@@ -130,7 +223,7 @@ export class ActiveAiInput {
         throw new Error();
       return {
         status: "accepted",
-        handle: target.handle,
+        handle: chosen.handle,
         requestId: prompt.requestId,
         message: prompt.stages.includes("turn_started")
           ? "AI の処理開始を確認しました。"

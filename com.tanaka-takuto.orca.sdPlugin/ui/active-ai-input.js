@@ -2,14 +2,17 @@ const form = document.getElementById("command-form");
 const labelInput = document.getElementById("label");
 const bodyInput = document.getElementById("body");
 const enterInput = document.getElementById("enter");
+const modeInput = document.getElementById("recipient-mode");
+const recipient = document.getElementById("recipient");
+const recipientDetails = document.getElementById("recipient-details");
 const save = document.getElementById("save");
 const message = document.getElementById("message");
 const result = document.getElementById("last-result");
 let socket, inspectorId, actionId, actionUuid;
 let settings = {};
 let dirty = false;
-let pendingRevision, saveTimer, pollTimer, requestId;
-const controls = [labelInput, bodyInput, enterInput, save];
+let pendingRevision, saveTimer, pollTimer, viewTimer, requestId;
+const controls = [labelInput, bodyInput, enterInput, modeInput, save];
 function showMessage(text) {
   message.textContent = text;
 }
@@ -17,6 +20,7 @@ function hydrate() {
   labelInput.value = settings.label ?? "";
   bodyInput.value = settings.body ?? "";
   enterInput.checked = settings.enter === true;
+  modeInput.checked = settings.recipientMode === "displayed-v1";
 }
 function send(event, payload) {
   if (socket?.readyState !== WebSocket.OPEN) return false;
@@ -35,7 +39,16 @@ function requestResult() {
   clearTimeout(pollTimer);
   requestId = `${Date.now()}-${Math.random()}`;
   send("sendToPlugin", { type: "get-active-input-result", requestId });
-  pollTimer = setTimeout(requestResult, 2_000);
+  clearTimeout(viewTimer);
+  const expected = requestId;
+  viewTimer = setTimeout(() => {
+    if (requestId !== expected) return;
+    requestId = undefined;
+    recipient.textContent =
+      "表示先の取得を確認できません。キーの更新を確認してください。";
+    recipientDetails.textContent = "";
+    pollTimer = setTimeout(requestResult, 2000);
+  }, 5000);
 }
 form.addEventListener("input", () => {
   dirty = true;
@@ -48,6 +61,7 @@ form.addEventListener("submit", (event) => {
     label: labelInput.value,
     body: bodyInput.value,
     enter: enterInput.checked,
+    recipientMode: modeInput.checked ? "displayed-v1" : undefined,
     revision,
   };
   if (!send("setSettings", next)) {
@@ -56,9 +70,13 @@ form.addEventListener("submit", (event) => {
   }
   settings = next;
   pendingRevision = revision;
+  requestId = undefined;
+  recipient.textContent = "保存中です。表示先を再取得します。";
+  recipientDetails.textContent = "";
   dirty = false;
   clearTimeout(saveTimer);
   clearTimeout(pollTimer);
+  clearTimeout(viewTimer);
   showMessage("設定を保存しています…");
   saveTimer = setTimeout(() => {
     pendingRevision = undefined;
@@ -102,19 +120,79 @@ window.connectElgatoStreamDeckSocket = (
       event.event === "sendToPropertyInspector" &&
       event.payload.actionId === actionId &&
       event.payload.type === "active-input-result" &&
+      !pendingRevision &&
       event.payload.requestId === requestId
     ) {
-      result.textContent = event.payload.busy
-        ? "入力の受付を待っています…"
-        : (event.payload.result?.message ?? "まだ入力していません。");
+      clearTimeout(viewTimer);
+      requestId = undefined;
+      pollTimer = setTimeout(requestResult, 2000);
+      const target = event.payload.recipient;
+      recipient.textContent = target
+        ? [
+            target.workspace.project || "未取得",
+            target.workspace.name,
+            `${target.target.name} · ${target.target.identity}`,
+            `照合用位置（画面と異なる場合あり）: ${target.location}`,
+            event.payload.enabled
+              ? event.payload.state || "キーの表示先へ入力します"
+              : "設定の確認保存まで入力しません",
+          ].join("\n")
+        : event.payload.state || "表示先を取得できません。";
+      recipientDetails.textContent = target
+        ? [
+            target.workspace.path,
+            `WS: ${target.workspace.id}`,
+            `Host: ${target.workspace.hostId}`,
+            `Runtime: ${target.selection.runtimeId}`,
+            `Handle: ${target.target.handle}`,
+            `Incarnation: ${target.target.incarnationId}`,
+            `Pane: ${target.target.paneKey}`,
+          ].join("\n")
+        : "";
+      const receipt = event.payload.receipt;
+      const old = receipt?.recipient;
+      result.textContent = receipt
+        ? [
+            event.payload.busy
+              ? "受付確認中（この押下の内容）"
+              : "直近の押下（現在の設定とは別の記録）",
+            new Date(receipt.at).toLocaleString(),
+            "操作: " +
+              receipt.label +
+              (receipt.enter ? " / 入力＋Enter" : " / 入力のみ"),
+            old
+              ? [
+                  old.workspace.project,
+                  old.workspace.name,
+                  old.target.name,
+                  old.target.identity,
+                  old.location,
+                  old.workspace.path,
+                  `WS: ${old.workspace.id}`,
+                  `Handle: ${old.target.handle}`,
+                  `Incarnation: ${old.target.incarnationId}`,
+                  `Pane: ${old.target.paneKey}`,
+                  `Host: ${old.workspace.hostId}`,
+                  `Runtime: ${old.selection.runtimeId}`,
+                ].join("\n")
+              : "押下時の入力先は未取得",
+            receipt.result.message,
+          ].join("\n")
+        : "このプラグイン起動中の記録はありません。過去の未入力を示すものではありません。";
+      result.style.whiteSpace = "pre-wrap";
+      result.style.overflowWrap = "anywhere";
       result.dataset.error = String(
-        ["unknown", "refused"].includes(event.payload.result?.status),
+        ["unknown", "refused"].includes(receipt?.result.status),
       );
     }
   });
   socket.addEventListener("close", () => {
     clearTimeout(saveTimer);
     clearTimeout(pollTimer);
+    clearTimeout(viewTimer);
+    requestId = undefined;
+    recipient.textContent = "接続切れ・表示先を確認できません。";
+    recipientDetails.textContent = "";
     for (const element of controls) element.disabled = true;
     showMessage(
       "Stream Deck との接続が切れました。入力は保持しています。アクションを選び直してください。",

@@ -132,3 +132,14 @@ test("保存待ち中の遅い応答で編集中の文字列や Enter 設定を�
   assert.equal(f.nodes.get("body").value, "編集中の文字列");
   assert.equal(f.nodes.get("enter").checked, false);
 });
+
+test("表示AIへの入力を明示確認して保存するまで、新しい宛先モードを有効にしない", () => {
+  const f = inspector({ body: "keep", enter: true }, "active-ai-input");
+  assert.equal(f.nodes.get("recipient-mode").checked, false);
+  assert.equal(f.save().recipientMode, undefined);
+  f.nodes.get("recipient-mode").checked = true;
+  const s = f.save();
+  assert.equal(s.recipientMode, "displayed-v1");
+  assert.equal(s.body, "keep");
+  assert.equal(s.enter, true);
+});

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "Name": "Orca",
-  "Version": "0.5.2.0",
+  "Version": "0.6.0.0",
   "Author": "tanaka-takuto",
   "Description": "Orca のワークスペース状態の表示・切り替え、シェルコマンドの実行、AIへの指示送信を行います。",
   "UUID": "com.tanaka-takuto.orca",
@@ -42,10 +42,10 @@
       ]
     },
     {
-      "Name": "アクティブAIに入力",
+      "Name": "表示AIへ入力",
       "UUID": "com.tanaka-takuto.orca.active-ai-input",
       "Icon": "imgs/action-icon",
-      "Tooltip": "Orca で選択中の AI ターミナルに定型文を入力します。Enter の送信は任意です。",
+      "Tooltip": "キーに表示されたワークスペースのAIへ文字列を入力します。Enterは任意。",
       "PropertyInspectorPath": "ui/active-ai-input.html",
       "Controllers": ["Keypad"],
       "States": [

@@ -51,12 +51,20 @@ function fixture({
 } = {}) {
   const calls = [];
   let readCount = 0;
-  const input = new ActiveAiInput(
+  const raw = new ActiveAiInput(
     {
       snapshot: async () => ({
         runtimeId: "r",
         truncated: false,
-        workspaces: [{ id: selected.workspaceId, hostId: "local" }],
+        workspaces: [
+          {
+            id: selected.workspaceId,
+            hostId: "local",
+            name: "Selected",
+            project: "Repo",
+            path: "/selected",
+          },
+        ],
       }),
     },
     async (args) => {
@@ -71,6 +79,39 @@ function fixture({
           hostScope: { hostIds: ["local"] },
           truncated: false,
           terminals: rows,
+          topologyRevisions: { [selected.workspaceId]: 1 },
+          visualLayouts: [
+            {
+              worktreeId: selected.workspaceId,
+              root: {
+                type: "group",
+                tabs: [
+                  {
+                    tabId: "tab",
+                    panes: rows
+                      .map((row) => ({
+                        type: "terminal",
+                        handle: row.handle,
+                        tabId: row.tabId,
+                        leafId: row.leafId,
+                      }))
+                      .reduce(
+                        (first, second) =>
+                          first
+                            ? {
+                                type: "pane-split",
+                                direction: "vertical",
+                                first,
+                                second,
+                              }
+                            : second,
+                        undefined,
+                      ),
+                  },
+                ],
+              },
+            },
+          ],
         });
       }
       if (receipt instanceof Error) throw receipt;
@@ -87,7 +128,13 @@ function fixture({
     },
     async () => selections[Math.min(readCount++, selections.length - 1)],
   );
-  return { input, calls };
+  const input = {
+    send: async (settings, current) => {
+      const displayed = await raw.resolve();
+      return raw.send(settings, displayed, current);
+    },
+  };
+  return { input, raw, calls };
 }
 
 test("ORCA の保存状態から選択中のワークスペースと分割ペインを取り出す", () => {
@@ -162,28 +209,24 @@ for (const rows of [
       false,
     );
   });
-test("取得中のワークスペース・ペイン・ランタイム変更では入力しない", async () => {
-  for (const patch of [
-    { workspaceId: "other" },
-    { paneKey: "tab:other" },
-    { runtimeId: "other" },
-  ]) {
-    const f = fixture({ selections: [selected, { ...selected, ...patch }] });
-    assert.equal((await f.input.send({ body: "指示" })).status, "cancelled");
-    assert.equal(
-      f.calls.some((args) => args[1] === "send"),
-      false,
-    );
-  }
-  let current = true;
+test("表示後の保存選択変更では表示相手を保ち、実行前の設定変更では入力しない", async () => {
   const f = fixture({
+    selections: [selected, { ...selected, paneKey: "tab:other" }],
+  });
+  assert.equal((await f.input.send({ body: "指示" })).status, "accepted");
+  let current = true;
+  const g = fixture({
     duringList: () => {
       current = false;
     },
   });
   assert.equal(
-    (await f.input.send({ body: "指示" }, () => current)).status,
+    (await g.input.send({ body: "指示" }, () => current)).status,
     "cancelled",
+  );
+  assert.equal(
+    g.calls.some((x) => x[1] === "send"),
+    false,
   );
 });
 test("空文字・制御文字では入力せず、輸送の結果が不明でも再送しない", async () => {
@@ -195,7 +238,9 @@ test("空文字・制御文字では入力せず、輸送の結果が不明で�
     "x".repeat(16001),
   ]) {
     const f = fixture();
-    await assert.rejects(f.input.send({ body }));
+    const displayed = await f.raw.resolve();
+    f.calls.length = 0;
+    await assert.rejects(f.raw.send({ body }, displayed));
     assert.equal(f.calls.length, 0);
   }
   const f = fixture({ receipt: new Error("timeout") });
