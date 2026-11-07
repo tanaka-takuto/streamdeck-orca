@@ -38,24 +38,26 @@ const info = {
     },
   ],
 };
-const row = (id) => ({
+const row = (id, agentState = "working") => ({
   worktreeId: id,
   displayName: id.toUpperCase(),
   repo: "Project",
   path: `/${id}`,
   hostId: "local",
-  status: "working",
+  status: agentState === "waiting" ? "permission" : "working",
   terminalVerdict: "live",
-  agents: [{ paneKey: `tab:${id}`, state: "working" }],
+  agents: [{ paneKey: `tab:${id}`, state: agentState }],
 });
 const response = (result) => ({
   ok: true,
   _meta: { runtimeId: "test-runtime" },
   result,
 });
-const snapshot = (ids) =>
+const snapshot = (ids, waitingIds = []) =>
   response({
-    worktrees: ids.map(row),
+    worktrees: ids.map((id) =>
+      row(id, waitingIds.includes(id) ? "waiting" : "working"),
+    ),
     hostScope: { hostIds: ["local"], omittedHostIds: [] },
     truncated: false,
   });
@@ -194,8 +196,8 @@ else if (args[1] === 'list') {
         state: 0,
       });
     },
-    setRows(ids) {
-      writeFileSync(dataPath, JSON.stringify(snapshot(ids)));
+    setRows(ids, waitingIds = []) {
+      writeFileSync(dataPath, JSON.stringify(snapshot(ids, waitingIds)));
     },
     switches() {
       try {
@@ -328,4 +330,59 @@ test("SDK 再接続時に ID ごとの選択を復元し、新規ワークスペ
     f.history.slice(change).some(imageContains("key-main", "A")),
     false,
   );
+});
+
+test("ダイヤル押し込みで同じ ID のキーだけが入力待ちを順送りし、Orca は開かない", async (t) => {
+  const f = await fixture(t);
+  f.setRows(["a", "b", "c", "d"], ["b", "d"]);
+  f.appear("key-main", "key", "main");
+  f.appear("key-mirror", "key", "main");
+  f.appear("key-other", "key", "other");
+  f.appear("dial-main", "dial", "main");
+  await f.wait(
+    (m) => m.event === "setFeedback" && m.payload.position === "1 / 4",
+  );
+  f.send("propertyInspectorDidAppear", "dial-main", "dial");
+  async function view(requestId) {
+    f.send("sendToPlugin", "dial-main", "dial", {
+      type: "get-control",
+      requestId,
+    });
+    return (
+      await f.wait(
+        (m) =>
+          m.event === "sendToPropertyInspector" &&
+          m.payload.requestId === requestId,
+      )
+    ).payload;
+  }
+  const start = f.history.length;
+  f.send("dialDown", "dial-main", "dial");
+  f.send("dialUp", "dial-main", "dial");
+  await f.wait(imageContains("key-main", "B"), start);
+  await f.wait(imageContains("key-mirror", "B"), start);
+  assert.equal(
+    (await view("after-one-click")).workspaceName,
+    "B",
+    "押す・離すで二回進めない",
+  );
+  f.send("dialDown", "dial-main", "dial");
+  await f.wait(imageContains("key-main", "D"), start);
+  f.send("dialDown", "dial-main", "dial");
+  assert.equal((await view("wrapped")).workspaceName, "B");
+  assert.equal(
+    f.history.slice(start).some(imageContains("key-other", "B")),
+    false,
+  );
+  assert.equal(
+    f.history.slice(start).some(imageContains("key-other", "D")),
+    false,
+  );
+  assert.deepEqual(f.switches(), []);
+  // Refresh the shared catalog after the remaining workspaces leave input-waiting.
+  f.setRows(["a", "b", "c", "d"]);
+  await view("no-waiting");
+  f.send("dialDown", "dial-main", "dial");
+  assert.equal((await view("kept-selection")).workspaceName, "B");
+  assert.deepEqual(f.switches(), []);
 });

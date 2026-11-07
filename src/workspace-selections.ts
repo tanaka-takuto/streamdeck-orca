@@ -134,6 +134,25 @@ export class WorkspaceSelections {
     for (const listener of this.listeners.get(id) ?? []) listener(view);
   }
 
+  selectNextWaiting(controlId: string): boolean {
+    if (!this.ready || !this.state.snapshot || !this.catalog.length)
+      return false;
+    const id = normalizeControlId(controlId);
+    const selected = this.selections.get(id)?.workspaceId;
+    const index = this.catalog.findIndex((row) => row.id === selected);
+    for (let step = 1; step <= this.catalog.length; step++) {
+      const workspace = this.catalog[(index + step) % this.catalog.length];
+      if (getWorkspaceStatus(workspace) !== "waiting") continue;
+      if (workspace.id !== selected) {
+        this.choose(id, workspace);
+        const view = this.view(id);
+        for (const listener of this.listeners.get(id) ?? []) listener(view);
+      }
+      return true;
+    }
+    return false;
+  }
+
   view(controlId: string): ControlView {
     const id = normalizeControlId(controlId);
     const selection = this.selections.get(id);

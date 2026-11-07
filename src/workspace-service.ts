@@ -180,6 +180,10 @@ class WorkspaceService {
     const binding = this.bindings.get(actionId);
     if (binding) this.selections.rotate(binding.controlId, ticks);
   }
+  selectNextWaiting(actionId: string): void {
+    const binding = this.bindings.get(actionId);
+    if (binding) this.selections.selectNextWaiting(binding.controlId);
+  }
   async press(actionId: string): Promise<void> {
     await this.buttons.press(actionId);
   }

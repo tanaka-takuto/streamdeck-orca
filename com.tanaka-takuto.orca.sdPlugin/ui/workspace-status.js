@@ -96,7 +96,7 @@ window.connectElgatoStreamDeckSocket = (
     ? "ダイヤルで表示対象を選ぶ"
     : "ボタンで状態を見て開く";
   document.getElementById("description").textContent = dial
-    ? "同じ操作 ID のボタンに表示するワークスペースを、回転で切り替えます。新しいワークスペースも自動で候補に入ります。"
+    ? "回転で全候補を、押し込みで次の入力待ちを選び、同じ操作 ID のボタンに表示します。入力待ちがなければ現在の選択を維持します。"
     : "ダイヤルと同じ操作 ID を設定してください。回転で表示対象を選び、このボタンを押すと Orca を開きます。";
   socket = new WebSocket(`ws://127.0.0.1:${port}`);
   socket.addEventListener("open", () => {
@@ -143,7 +143,7 @@ window.connectElgatoStreamDeckSocket = (
     workspaceStatus.textContent = `${payload.status} · 候補 ${payload.available} 件`;
     showMessage(
       payload.error ||
-        "ダイヤルを回すと選択が変わります。設定画面を開き直す必要はありません。",
+        "回転で全候補、押し込みで次の入力待ちを選べます。開くときはボタンを押してください。",
       Boolean(payload.error),
     );
     pollTimer = setTimeout(requestView, 2_000);

@@ -1,5 +1,6 @@
 import {
   action,
+  type DialDownEvent,
   type DialRotateEvent,
   type DidReceiveSettingsEvent,
   type KeyDownEvent,
@@ -79,6 +80,9 @@ export class WorkspaceDialAction extends SingletonAction<ControlSettings> {
   }
   override onDialRotate(ev: DialRotateEvent<ControlSettings>): void {
     workspaceService.rotate(ev.action.id, ev.payload.ticks);
+  }
+  override onDialDown(ev: DialDownEvent<ControlSettings>): void {
+    workspaceService.selectNextWaiting(ev.action.id);
   }
   override async onSendToPlugin(
     ev: SendToPluginEvent<ControlMessage, ControlSettings>,

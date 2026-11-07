@@ -141,3 +141,63 @@ test("空の ID は main、任意の文字列 ID はそのまま対応づける"
   assert.equal(normalizeControlId(" 作業 A "), "作業 A");
   assert.equal(normalizeControlId("__proto__"), "__proto__");
 });
+
+const waitingRow = (id) => ({
+  ...row(id),
+  agents: [{ paneKey: `tab:${id}`, state: "waiting" }],
+});
+
+test("押し込みは現在位置の次から入力待ちだけを順送りし、同じ ID の表示に反映する", () => {
+  const f = fixture({ main: { workspaceId: "c", workspaceName: "c" } });
+  const key = [],
+    mirror = [],
+    other = [];
+  f.selections.subscribe("main", (view) => key.push(view));
+  f.selections.subscribe("main", (view) => mirror.push(view));
+  f.selections.subscribe("other", (view) => other.push(view));
+  f.emit(state([waitingRow("a"), row("b"), row("c"), waitingRow("d")]));
+  assert.equal(f.selections.selectNextWaiting("main"), true);
+  assert.equal(key.at(-1).workspaceId, "d");
+  assert.equal(mirror.at(-1).workspaceId, "d");
+  assert.equal(other.at(-1).workspaceId, "a");
+  f.selections.selectNextWaiting("main");
+  assert.equal(key.at(-1).workspaceId, "a", "末尾から先頭に戻る");
+  assert.deepEqual(f.changes.at(-1), {
+    id: "main",
+    workspaceId: "a",
+    workspaceName: "a",
+  });
+});
+
+test("入力待ちがない・接続失敗・未取得の場合は選択を維持する", () => {
+  const f = fixture({ main: { workspaceId: "a", workspaceName: "a" } });
+  f.selections.subscribe("main", () => {});
+  assert.equal(f.selections.selectNextWaiting("main"), false);
+  f.emit(state([row("a"), row("b")]));
+  assert.equal(f.selections.selectNextWaiting("main"), false);
+  f.emit(state([row("a"), waitingRow("b")]));
+  f.emit({ snapshot: null, error: "offline" });
+  assert.equal(f.selections.selectNextWaiting("main"), false);
+  assert.equal(f.selections.view("main").workspaceId, "a");
+  assert.equal(f.changes.length, 0);
+});
+
+test("一つだけの入力待ちはそのまま維持し、状態が変わったら最新の候補を選ぶ", () => {
+  const f = fixture({ main: { workspaceId: "b", workspaceName: "b" } });
+  f.selections.subscribe("main", () => {});
+  f.emit(state([row("a"), waitingRow("b"), row("c")]));
+  assert.equal(f.selections.selectNextWaiting("main"), true);
+  assert.equal(f.selections.view("main").workspaceId, "b");
+  assert.equal(f.changes.length, 0, "同じ選択を保存し直さない");
+  f.emit(state([row("a"), row("b"), waitingRow("c")]));
+  f.selections.selectNextWaiting("main");
+  assert.equal(f.selections.view("main").workspaceId, "c");
+});
+
+test("選択先が消失している場合は最初の入力待ちを選ぶ", () => {
+  const f = fixture({ main: { workspaceId: "missing", workspaceName: "old" } });
+  f.selections.subscribe("main", () => {});
+  f.emit(state([row("a"), waitingRow("b"), waitingRow("c")]));
+  f.selections.selectNextWaiting("main");
+  assert.equal(f.selections.view("main").workspaceId, "b");
+});

@@ -45,13 +45,14 @@
       "Name": "ワークスペース切り替え",
       "UUID": "com.tanaka-takuto.orca.workspace-dial",
       "Icon": "imgs/action-icon",
-      "Tooltip": "回転すると、同じ操作 ID のキーに表示するワークスペースを切り替えます。",
+      "Tooltip": "回転で全候補を選び、押し込みで次の入力待ちへ切り替えます。同じ操作 ID のキーに反映します。",
       "PropertyInspectorPath": "ui/workspace-status.html",
       "Controllers": ["Encoder"],
       "Encoder": {
         "layout": "ui/workspace-dial.json",
         "TriggerDescription": {
-          "Rotate": "同じ操作 ID のキーのワークスペースを選ぶ"
+          "Rotate": "同じ操作 ID のキーのワークスペースを選ぶ",
+          "Push": "次の入力待ちワークスペースを選ぶ"
         }
       },
       "States": [
