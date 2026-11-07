@@ -1,3 +1,4 @@
+import { settleDisplay } from "./display-wait";
 import type { OrcaClient } from "./orca/client";
 import { getWorkspaceStatus, type WorkspaceStatus } from "./orca/model";
 import type { MonitorState, WorkspaceMonitor } from "./orca/monitor";
@@ -22,6 +23,7 @@ type Binding = {
   desiredImage?: string;
   display?: { name: string; status: DisplayStatus };
   busy: boolean;
+  displayed: boolean;
 };
 
 const styles: Record<
@@ -94,6 +96,7 @@ export class WorkspaceButtons {
       settings: { ...settings },
       renderVersion: 0,
       busy: false,
+      displayed: false,
     };
     this.bindings.set(key.id, binding);
     binding.stop = this.monitor.subscribe((state) =>
@@ -175,10 +178,13 @@ export class WorkspaceButtons {
       .then(async () => {
         if (!current()) return;
         await binding.key.setImage(image);
+        if (this.bindings.get(binding.key.id) === binding)
+          binding.displayed = true;
       })
       .catch((error: unknown) => {
         if (current()) {
           binding.desiredImage = undefined;
+          binding.displayed = false;
           this.onError(
             binding.key.id,
             error instanceof Error
@@ -195,6 +201,24 @@ export class WorkspaceButtons {
     return next;
   }
 
+  async waitForDisplay(
+    actionId: string,
+    isActive = () => true,
+    timeoutMs = 2_000,
+  ): Promise<boolean> {
+    if (timeoutMs <= 0) return false;
+    const deadline = Date.now() + timeoutMs;
+    while (isActive()) {
+      const binding = this.bindings.get(actionId);
+      if (!binding) return false;
+      if (binding.displayed) return true;
+      const pending = this.renders.get(actionId);
+      if (!pending || !(await settleDisplay(pending, deadline - Date.now())))
+        return false;
+    }
+    return false;
+  }
+
   async press(actionId: string, isActive = () => true): Promise<void> {
     const binding = this.bindings.get(actionId);
     if (!binding || binding.busy) return;
@@ -205,6 +229,10 @@ export class WorkspaceButtons {
       this.navigationVersion === version;
     binding.busy = true;
     try {
+      if (!binding.displayed)
+        throw new Error(
+          "キーの表示を更新しています。表示を確認して、もう一度押してください。",
+        );
       if (!binding.settings.workspaceId)
         throw new Error(
           "ワークスペースの取得を待って、ダイヤルで表示対象を選んでください。",

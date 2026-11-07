@@ -14,7 +14,12 @@ import type { ExecutionResult } from "../orca/execution";
 import type { WorkspaceKey } from "../workspace-buttons";
 
 type Settings = ActiveInputSettings & { revision?: string };
-type Binding = { key: WorkspaceKey; settings: Settings; queue: Promise<void> };
+type Binding = {
+  key: WorkspaceKey;
+  settings: Settings;
+  queue: Promise<void>;
+  displayed?: Settings;
+};
 type ViewRequest = { type: string; requestId: string };
 
 @action({ UUID: "com.tanaka-takuto.orca.active-ai-input" })
@@ -25,21 +30,24 @@ export class ActiveAiInputAction extends SingletonAction<Settings> {
     this.runner,
   );
   private readonly bindings = new Map<string, Binding>();
-  private readonly busy = new Set<string>();
+  private readonly renders = new Map<string, Promise<void>>();
+  private readonly busy = new Map<string, Settings>();
   private readonly results = new Map<string, ExecutionResult>();
 
   private bind(key: WorkspaceKey, settings: Settings): void {
     const binding = {
       key,
-      settings,
-      queue: this.bindings.get(key.id)?.queue ?? Promise.resolve(),
+      settings: { ...settings },
+      queue: this.renders.get(key.id) ?? Promise.resolve(),
+      displayed: undefined,
     };
     this.bindings.set(key.id, binding);
     this.results.delete(key.id);
     this.render(binding);
   }
   private render(binding: Binding): void {
-    const { key, settings } = binding;
+    const { key } = binding;
+    const settings = this.busy.get(key.id) ?? binding.settings;
     const result = this.results.get(key.id);
     let phase = settings.enter === true ? "入力＋Enter" : "入力のみ";
     if (!settings.body?.trim()) phase = "要設定";
@@ -60,11 +68,23 @@ export class ActiveAiInputAction extends SingletonAction<Settings> {
     binding.queue = binding.queue
       .catch(() => {})
       .then(async () => {
-        if (this.bindings.get(key.id) === binding) await key.setImage(image);
+        if (this.bindings.get(key.id) === binding) {
+          if (binding.displayed !== settings) binding.displayed = undefined;
+          await key.setImage(image);
+          if (this.bindings.get(key.id) === binding)
+            binding.displayed = settings;
+        }
       });
-    void binding.queue.catch(() =>
-      streamDeck.logger.warn("アクティブ AI 入力キーの表示を更新できません。"),
-    );
+    const rendering = binding.queue;
+    this.renders.set(key.id, rendering);
+    const cleanup = () => {
+      if (this.renders.get(key.id) === rendering) this.renders.delete(key.id);
+    };
+    void rendering.then(cleanup, cleanup);
+    void binding.queue.catch(() => {
+      binding.displayed = undefined;
+      streamDeck.logger.warn("アクティブ AI 入力キーの表示を更新できません。");
+    });
   }
   override onWillAppear(ev: WillAppearEvent<Settings>): void {
     if (ev.action.isKey()) this.bind(ev.action, ev.payload.settings);
@@ -80,7 +100,17 @@ export class ActiveAiInputAction extends SingletonAction<Settings> {
     const id = ev.action.id;
     const binding = this.bindings.get(id);
     if (!binding || this.busy.has(id)) return;
-    this.busy.add(id);
+    if (binding.displayed !== binding.settings) {
+      this.results.set(id, {
+        status: "refused",
+        message:
+          "キーの表示を更新しています。表示を確認して、もう一度押してください。",
+      });
+      this.render(binding);
+      await binding.key.showAlert();
+      return;
+    }
+    this.busy.set(id, binding.settings);
     this.results.delete(id);
     this.render(binding);
     const current = () => this.bindings.get(id) === binding;

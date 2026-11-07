@@ -102,6 +102,7 @@ test("割り当て変更で遅いナビゲーション要求を無効にする",
     },
   });
   f.buttons.bind(f.key, { workspaceId: "a" });
+  await tick();
   await f.buttons.press(f.key.id);
   assert.equal(current?.(), true);
   f.buttons.bind(f.key, { workspaceId: "b" });
@@ -129,10 +130,89 @@ test("別のキーを押した後に古い要求で画面を奪わない", async
   });
   f.buttons.bind(f.key, { workspaceId: "a" });
   f.buttons.bind({ ...f.key, id: "key-b" }, { workspaceId: "b" });
+  await tick();
   await f.buttons.press("key-a");
   await f.buttons.press("key-b");
   assert.equal(guards[0](), false);
   assert.equal(guards[1](), true);
+});
+
+test("A表示中に割当Bの画像送信が遅れても、押下で見えていないBを開かない", async () => {
+  const opened = [];
+  const f = fixture({
+    focusWorkspace: async (id) => {
+      opened.push(id);
+      return true;
+    },
+  });
+  let release;
+  let visible;
+  const key = {
+    ...f.key,
+    setImage: async (image) => {
+      const s = decodeURIComponent(image);
+      if (s.includes(">B</text>"))
+        await new Promise((resolve) => {
+          release = resolve;
+        });
+      visible = s;
+    },
+  };
+  f.buttons.bind(key, { workspaceId: "a", workspaceName: "A" });
+  await tick();
+  f.buttons.bind(key, { workspaceId: "b", workspaceName: "B" });
+  await tick();
+  assert.match(visible, />A<\/text>/u);
+  await f.buttons.press(key.id);
+  assert.deepEqual(opened, []);
+  release();
+  await tick();
+  await f.buttons.press(key.id);
+  assert.deepEqual(opened, ["b"]);
+  f.buttons.unbind(key.id);
+});
+
+test("明示的な表示待ちにも上限があり、遅い画像が後で届いても自動移動しない", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fixture();
+  let release;
+  const key = {
+    ...f.key,
+    setImage: async () =>
+      await new Promise((resolve) => {
+        release = resolve;
+      }),
+  };
+  f.buttons.bind(key, { workspaceId: "b", workspaceName: "B" });
+  await tick();
+  const pending = f.buttons.waitForDisplay(key.id);
+  t.mock.timers.tick(2000);
+  assert.equal(await pending, false);
+  release();
+  await tick();
+  f.buttons.unbind(key.id);
+});
+
+test("新しい割当の画像送信が失敗した場合も、表示成功として開かない", async () => {
+  const opened = [];
+  const f = fixture({
+    focusWorkspace: async (id) => {
+      opened.push(id);
+      return true;
+    },
+  });
+  const key = {
+    ...f.key,
+    setImage: async () => {
+      throw Error("image failed");
+    },
+  };
+  f.buttons.bind(key, { workspaceId: "b", workspaceName: "B" });
+  await tick();
+  await f.buttons.press(key.id);
+  assert.deepEqual(opened, []);
+  assert.ok(f.errors.some((e) => e.error.includes("表示")));
+  f.buttons.unbind(key.id);
 });
 
 test("進行中だけキー画像が連続して変わり、入力待ちになると止まる", async (t) => {
