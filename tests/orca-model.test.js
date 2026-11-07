@@ -157,3 +157,27 @@ test("別ワークスペース・別ホスト・切断済みのターミナル�
   ])
     assert.equal(selectTerminal(own, [terminal("tab:main", extra)]), undefined);
 });
+
+test("ターミナル不在の none は取得不能と区別して待機として扱う", () => {
+  const snapshot = parseSnapshot({
+    ok: true,
+    _meta: { runtimeId: "r" },
+    result: {
+      hostScope: { hostIds: ["local"], omittedHostIds: [] },
+      truncated: false,
+      worktrees: [
+        {
+          worktreeId: "repo::/idle",
+          path: "/idle",
+          displayName: "Idle",
+          hostId: "local",
+          status: "inactive",
+          terminalVerdict: "none",
+          agents: [],
+        },
+      ],
+    },
+  });
+  assert.equal(snapshot.workspaces[0].terminalVerdict, "none");
+  assert.equal(getWorkspaceStatus(snapshot.workspaces[0]), "idle");
+});

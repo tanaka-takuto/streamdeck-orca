@@ -13,6 +13,7 @@ export type ControlSettings = { controlId?: string };
 type GlobalSettings = { workspaceSelections?: Record<string, SavedSelection> };
 type Binding = {
   controlId: string;
+  key?: WorkspaceKey;
   stop?: () => void;
   lastSelection?: string;
   renderVersion: number;
@@ -39,6 +40,8 @@ class WorkspaceService {
     (id, selection) => this.remember(id, selection),
   );
   private readonly bindings = new Map<string, Binding>();
+  private readonly selectionUpdates = new Map<string, Promise<boolean>>();
+  private navigationVersion = 0;
   private globalSettings: GlobalSettings = {};
   private settingsReady = false;
   private saveTimer?: ReturnType<typeof setTimeout>;
@@ -104,6 +107,7 @@ class WorkspaceService {
     this.unbind(key.id);
     const binding: Binding = {
       controlId: normalizeControlId(controlId),
+      key,
       renderVersion: 0,
       queue: Promise.resolve(),
     };
@@ -176,22 +180,85 @@ class WorkspaceService {
     binding?.stop?.();
   }
 
-  rotate(actionId: string, ticks: number): void {
-    const binding = this.bindings.get(actionId);
-    if (binding) this.selections.rotate(binding.controlId, ticks);
+  async rotate(actionId: string, ticks: number): Promise<void> {
+    if (!Number.isFinite(ticks) || !Math.trunc(ticks)) return;
+    await this.updateSelection(actionId, (id) =>
+      this.selections.rotate(id, ticks),
+    );
   }
-  selectNextWaiting(actionId: string): void {
+  async selectNextWaiting(actionId: string): Promise<void> {
+    await this.updateSelection(actionId, (id) =>
+      this.selections.selectNextWaiting(id),
+    );
+  }
+
+  private updateSelection(
+    actionId: string,
+    change: (id: string) => void,
+  ): Promise<boolean> {
     const binding = this.bindings.get(actionId);
-    if (binding) this.selections.selectNextWaiting(binding.controlId);
+    if (!binding) return Promise.resolve(false);
+    const id = binding.controlId;
+    // 取得中の通信は monitor が共有し、連続する操作は入力順に適用する。
+    const previous = this.selectionUpdates.get(id) ?? Promise.resolve(true);
+    const next = Promise.all([
+      previous.catch(() => false),
+      this.monitor.refresh(),
+    ]).then(([, state]) => {
+      if (!state.snapshot || this.bindings.get(actionId) !== binding)
+        return false;
+      change(id);
+      return true;
+    });
+    this.selectionUpdates.set(id, next);
+    const cleanup = () => {
+      if (this.selectionUpdates.get(id) === next)
+        this.selectionUpdates.delete(id);
+    };
+    void next.then(cleanup, cleanup);
+    return next;
   }
   async press(actionId: string): Promise<void> {
-    await this.buttons.press(actionId);
+    const binding = this.bindings.get(actionId);
+    if (!binding) return;
+    const version = ++this.navigationVersion;
+    const current = () =>
+      this.bindings.get(actionId) === binding &&
+      this.navigationVersion === version;
+    try {
+      let pending = this.selectionUpdates.get(binding.controlId);
+      while (pending) {
+        if (!(await pending))
+          throw new Error(
+            this.monitor.state.error ??
+              "ワークスペース一覧を更新できません。もう一度ダイヤルを操作してください。",
+          );
+        if (!current()) return;
+        pending = this.selectionUpdates.get(binding.controlId);
+      }
+      if (current()) await this.buttons.press(actionId, current);
+    } catch (error) {
+      if (current()) {
+        this.report(
+          actionId,
+          error instanceof Error
+            ? error.message
+            : "ワークスペース一覧を更新できません。",
+        );
+        await binding.key?.showAlert();
+      }
+    }
   }
 
   async sendView(actionId: string, requestId: string): Promise<void> {
     const binding = this.bindings.get(actionId);
     if (!binding) return;
     await this.monitor.refresh();
+    let pending = this.selectionUpdates.get(binding.controlId);
+    while (pending) {
+      await pending;
+      pending = this.selectionUpdates.get(binding.controlId);
+    }
     if (
       this.bindings.get(actionId) !== binding ||
       streamDeck.ui.action?.id !== actionId

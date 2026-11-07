@@ -156,7 +156,7 @@ export class WorkspaceSelections {
   view(controlId: string): ControlView {
     const id = normalizeControlId(controlId);
     const selection = this.selections.get(id);
-    const workspace = this.catalog.find(
+    const workspace = this.state.snapshot?.workspaces.find(
       (row) => row.id === selection?.workspaceId,
     );
     return {

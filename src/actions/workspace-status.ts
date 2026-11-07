@@ -78,11 +78,13 @@ export class WorkspaceDialAction extends SingletonAction<ControlSettings> {
   override onWillDisappear(ev: WillDisappearEvent<ControlSettings>): void {
     workspaceService.unbind(ev.action.id);
   }
-  override onDialRotate(ev: DialRotateEvent<ControlSettings>): void {
-    workspaceService.rotate(ev.action.id, ev.payload.ticks);
+  override async onDialRotate(
+    ev: DialRotateEvent<ControlSettings>,
+  ): Promise<void> {
+    await workspaceService.rotate(ev.action.id, ev.payload.ticks);
   }
-  override onDialDown(ev: DialDownEvent<ControlSettings>): void {
-    workspaceService.selectNextWaiting(ev.action.id);
+  override async onDialDown(ev: DialDownEvent<ControlSettings>): Promise<void> {
+    await workspaceService.selectNextWaiting(ev.action.id);
   }
   override async onSendToPlugin(
     ev: SendToPluginEvent<ControlMessage, ControlSettings>,

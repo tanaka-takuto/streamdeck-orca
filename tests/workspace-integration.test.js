@@ -386,3 +386,60 @@ test("ダイヤル押し込みで同じ ID のキーだけが入力待ちを順�
   assert.equal((await view("kept-selection")).workspaceName, "B");
   assert.deepEqual(f.switches(), []);
 });
+
+test("回転時に最新の候補を取得し、連続回転の後すぐキーを押しても更新後の対象を開く", async (t) => {
+  const f = await fixture(t);
+  f.appear("key-main", "key", "main");
+  f.appear("dial-main", "dial", "main");
+  await f.wait(
+    (m) => m.event === "setFeedback" && m.payload.position === "1 / 2",
+  );
+  f.setRows(["a", "c", "d"]);
+  const start = f.history.length;
+  f.send("dialRotate", "dial-main", "dial", { ticks: 1, pressed: false });
+  f.send("dialRotate", "dial-main", "dial", { ticks: 1, pressed: false });
+  f.send("keyDown", "key-main", "key", { settings: { controlId: "main" } });
+  await f.wait(imageContains("key-main", "D"), start);
+  const deadline = Date.now() + 5_000;
+  while (f.switches().length === 0 && Date.now() < deadline)
+    await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(f.switches(), [
+    ["terminal", "switch", "--terminal", "fresh-d", "--json"],
+  ]);
+});
+
+test("押し込みでも最新状態を取得し、取得中の操作 ID 変更で古い選択操作を捨てる", async (t) => {
+  const f = await fixture(t);
+  f.appear("key-main", "key", "main");
+  f.appear("key-other", "key", "other");
+  f.appear("dial-main", "dial", "main");
+  await f.wait(
+    (m) => m.event === "setFeedback" && m.payload.position === "1 / 2",
+  );
+  f.setRows(["a", "b"], ["b"]);
+  const start = f.history.length;
+  f.send("dialDown", "dial-main", "dial");
+  await f.wait(imageContains("key-main", "B"), start);
+  f.send("dialRotate", "dial-main", "dial", { ticks: 1, pressed: false });
+  f.send("didReceiveSettings", "dial-main", "dial", {
+    settings: { controlId: "other" },
+  });
+  f.send("dialDown", "dial-main", "dial");
+  await f.wait(imageContains("key-other", "B"), start);
+  f.send("propertyInspectorDidAppear", "key-main", "key");
+  f.send("sendToPlugin", "key-main", "key", {
+    type: "get-control",
+    requestId: "binding-guard",
+  });
+  const view = await f.wait(
+    (m) =>
+      m.event === "sendToPropertyInspector" &&
+      m.payload.requestId === "binding-guard",
+  );
+  assert.equal(
+    view.payload.workspaceName,
+    "B",
+    "以前の ID への遅い回転を反映しない",
+  );
+  assert.deepEqual(f.switches(), []);
+});

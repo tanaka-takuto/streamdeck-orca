@@ -201,3 +201,48 @@ test("選択先が消失している場合は最初の入力待ちを選ぶ", ()
   f.selections.selectNextWaiting("main");
   assert.equal(f.selections.view("main").workspaceId, "b");
 });
+
+test("ターミナルがない・終了済みでもワークスペースをダイヤル候補に残す", () => {
+  const f = fixture();
+  f.selections.subscribe("main", () => {});
+  f.emit(
+    state([
+      {
+        ...row("a"),
+        activity: "inactive",
+        agents: [],
+        terminalVerdict: "none",
+      },
+      { ...row("b"), terminalVerdict: "exited" },
+      row("c"),
+      row("d"),
+    ]),
+  );
+  assert.equal(f.selections.view("main").available, 4);
+  assert.equal(f.selections.view("main").workspaceId, "a");
+  f.selections.rotate("main", 1);
+  assert.equal(f.selections.view("main").workspaceId, "b");
+  f.selections.rotate("main", 1);
+  assert.equal(f.selections.view("main").workspaceId, "c");
+});
+
+test("選択中のターミナルがなくなったら待機を表示し、次の回転で有効な候補を選ぶ", () => {
+  const f = fixture({ main: { workspaceId: "a", workspaceName: "A" } });
+  f.selections.subscribe("main", () => {});
+  f.emit(
+    state([
+      {
+        ...row("a"),
+        activity: "inactive",
+        agents: [],
+        terminalVerdict: "none",
+      },
+      row("b"),
+    ]),
+  );
+  assert.equal(f.selections.view("main").workspaceId, "a");
+  assert.equal(f.selections.view("main").status, "idle");
+  assert.equal(f.selections.view("main").available, 2);
+  f.selections.rotate("main", 1);
+  assert.equal(f.selections.view("main").workspaceId, "b");
+});

@@ -10,6 +10,10 @@ import {
   readResponse,
   selectTerminal,
 } from "./model";
+import {
+  createWorkspaceActivator,
+  type WorkspaceActivator,
+} from "./workspace-activation";
 
 export type CliRunner = (args: string[]) => Promise<unknown>;
 
@@ -70,7 +74,10 @@ export function createCliRunner(command = resolveOrcaCommand()): CliRunner {
 }
 
 export class OrcaClient {
-  constructor(private readonly run: CliRunner = createCliRunner()) {}
+  constructor(
+    private readonly run: CliRunner = createCliRunner(),
+    private readonly activateWorkspace: WorkspaceActivator = createWorkspaceActivator(),
+  ) {}
 
   async snapshot(): Promise<OrcaSnapshot> {
     return parseSnapshot(
@@ -88,6 +95,15 @@ export class OrcaClient {
     if (!workspace)
       throw new Error(
         "割り当てたワークスペースを取得できません。設定を確認してください。",
+      );
+    if (
+      workspace.terminalVerdict === "none" ||
+      workspace.terminalVerdict === "exited"
+    )
+      return await this.activateWorkspace(
+        workspace.id,
+        snapshot.runtimeId,
+        isCurrent,
       );
     const response = readResponse(
       await this.run([
@@ -134,8 +150,10 @@ export class OrcaClient {
     });
     const terminal = selectTerminal(workspace, terminals);
     if (!terminal)
-      throw new Error(
-        "表示できる対象ターミナルが見つかりません。Orca で状態を確認してください。",
+      return await this.activateWorkspace(
+        workspace.id,
+        snapshot.runtimeId,
+        isCurrent,
       );
     if (!isCurrent()) return false;
     const switched = readResponse(

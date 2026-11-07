@@ -21,7 +21,7 @@ export type OrcaWorkspace = {
   hostId: string;
   agents: OrcaAgent[];
   activity: string;
-  terminalVerdict: "live" | "exited" | "unverifiable";
+  terminalVerdict: "live" | "exited" | "none" | "unverifiable";
 };
 
 export type OrcaSnapshot = {
@@ -135,7 +135,9 @@ export function parseSnapshot(value: unknown): OrcaSnapshot {
         activity: covered ? text(row.status, "unknown") : "unknown",
         terminalVerdict:
           covered &&
-          (row.terminalVerdict === "live" || row.terminalVerdict === "exited")
+          (row.terminalVerdict === "live" ||
+            row.terminalVerdict === "exited" ||
+            row.terminalVerdict === "none")
             ? row.terminalVerdict
             : ("unverifiable" as const),
       };

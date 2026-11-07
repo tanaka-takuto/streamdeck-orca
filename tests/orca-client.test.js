@@ -125,3 +125,30 @@ test("画面切り替えの失敗を成功扱いせず、自動再実行しな�
   await assert.rejects(client.focusWorkspace("repo::/a"), /表示|切り替え/u);
   assert.equal(switches, 1);
 });
+
+test("ターミナル不在・終了済みでもワークスペース自体を開く", async () => {
+  for (const terminalVerdict of ["none", "exited"]) {
+    const calls = [];
+    const activated = [];
+    const client = new OrcaClient(
+      async (args) => {
+        calls.push(args);
+        const value = snapshot();
+        value.result.worktrees[0] = {
+          ...value.result.worktrees[0],
+          status: "inactive",
+          agents: [],
+          terminalVerdict,
+        };
+        return value;
+      },
+      async (id, runtimeId, current) => {
+        activated.push({ id, runtimeId });
+        return current();
+      },
+    );
+    assert.equal(await client.focusWorkspace("repo::/a"), true);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(activated, [{ id: "repo::/a", runtimeId: "runtime-a" }]);
+  }
+});

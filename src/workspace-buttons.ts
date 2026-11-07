@@ -194,11 +194,12 @@ export class WorkspaceButtons {
     return next;
   }
 
-  async press(actionId: string): Promise<void> {
+  async press(actionId: string, isActive = () => true): Promise<void> {
     const binding = this.bindings.get(actionId);
     if (!binding || binding.busy) return;
     const version = ++this.navigationVersion;
     const isCurrent = () =>
+      isActive() &&
       this.bindings.get(actionId) === binding &&
       this.navigationVersion === version;
     binding.busy = true;
