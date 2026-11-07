@@ -12,20 +12,22 @@ export type WorkspaceKey = {
   showAlert(): Promise<void>;
 };
 
+type DisplayStatus = WorkspaceStatus | "unassigned";
 type Binding = {
   key: WorkspaceKey;
   settings: WorkspaceSettings;
   stop?: () => void;
   renderVersion: number;
-  lastImage?: string;
+  desiredImage?: string;
+  display?: { name: string; status: DisplayStatus };
   busy: boolean;
 };
 
 const styles: Record<
-  WorkspaceStatus | "unassigned",
+  DisplayStatus,
   { color: string; symbol: string; lines: string[] }
 > = {
-  working: { color: "#145c9e", symbol: "▶", lines: ["進行中"] },
+  working: { color: "#145c9e", symbol: "", lines: ["進行中"] },
   waiting: { color: "#965200", symbol: "?", lines: ["入力待ち"] },
   review: { color: "#086a64", symbol: "!", lines: ["返答あり", "要確認"] },
   idle: { color: "#374151", symbol: "−", lines: ["待機"] },
@@ -49,7 +51,8 @@ function escapeXml(value: string): string {
 
 export function keyImage(
   name: string,
-  status: WorkspaceStatus | "unassigned",
+  status: DisplayStatus,
+  frame = 0,
 ): string {
   const style = styles[status];
   const title = Array.from(name).slice(0, 12).join("");
@@ -57,7 +60,11 @@ export function keyImage(
 <rect width="144" height="144" rx="16" fill="${style.color}"/>
 <g fill="#fff" font-family="sans-serif" text-anchor="middle">
 <text x="72" y="25" font-size="16">${escapeXml(title)}</text>
-<text x="72" y="77" font-size="43" font-weight="bold">${style.symbol}</text>
+${
+  status === "working"
+    ? `<g fill="none" stroke="#fff" stroke-width="6"><circle cx="72" cy="61" r="22" opacity="0.25"/><path d="M72 39 A22 22 0 0 1 94 61" stroke-linecap="round" transform="rotate(${(frame % 12) * 30} 72 61)"/></g>`
+    : `<text x="72" y="77" font-size="43" font-weight="bold">${style.symbol}</text>`
+}
 ${style.lines.map((line, index) => `<text x="72" y="${style.lines.length === 1 ? 119 : 107 + index * 23}" font-size="21">${line}</text>`).join("")}
 </g></svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
@@ -67,6 +74,9 @@ export class WorkspaceButtons {
   private readonly bindings = new Map<string, Binding>();
   private readonly renders = new Map<string, Promise<void>>();
   private navigationVersion = 0;
+  private animationTimer?: ReturnType<typeof setInterval>;
+  private animationFrame = 0;
+  private animationBusy = false;
   constructor(
     private readonly monitor: WorkspaceMonitor,
     private readonly client: Pick<OrcaClient, "focusWorkspace">,
@@ -94,9 +104,11 @@ export class WorkspaceButtons {
     const binding = this.bindings.get(actionId);
     this.bindings.delete(actionId);
     binding?.stop?.();
+    this.updateAnimation();
   }
 
   private render(binding: Binding, state: MonitorState): void {
+    if (this.bindings.get(binding.key.id) !== binding) return;
     const workspace = state.snapshot?.workspaces.find(
       (row) => row.id === binding.settings.workspaceId,
     );
@@ -105,11 +117,54 @@ export class WorkspaceButtons {
       : state.snapshot
         ? "unassigned"
         : "unknown";
-    const image = keyImage(
-      workspace?.name ?? binding.settings.workspaceName ?? "Workspace",
+    binding.display = {
+      name: workspace?.name ?? binding.settings.workspaceName ?? "Workspace",
       status,
+    };
+    void this.draw(binding);
+    this.updateAnimation();
+  }
+
+  private updateAnimation(): void {
+    const working = [...this.bindings.values()].some(
+      (binding) => binding.display?.status === "working",
     );
-    if (binding.lastImage === image) return;
+    if (!working) {
+      clearInterval(this.animationTimer);
+      this.animationTimer = undefined;
+    } else if (!this.animationTimer) {
+      this.animationTimer = setInterval(() => void this.animate(), 100);
+      this.animationTimer.unref?.();
+    }
+  }
+
+  private async animate(): Promise<void> {
+    if (this.animationBusy) return;
+    this.animationBusy = true;
+    this.animationFrame = (this.animationFrame + 1) % 12;
+    try {
+      // 送信が遅いときはフレームを飛ばし、待ち行列を増やさない。
+      await Promise.all(
+        [...this.bindings.values()]
+          .filter((binding) => binding.display?.status === "working")
+          .map((binding) => this.draw(binding)),
+      );
+    } finally {
+      this.animationBusy = false;
+    }
+  }
+
+  private draw(binding: Binding): Promise<void> {
+    if (!binding.display || this.bindings.get(binding.key.id) !== binding)
+      return Promise.resolve();
+    const image = keyImage(
+      binding.display.name,
+      binding.display.status,
+      this.animationFrame,
+    );
+    if (binding.desiredImage === image)
+      return this.renders.get(binding.key.id) ?? Promise.resolve();
+    binding.desiredImage = image;
     const version = ++binding.renderVersion;
     const current = () =>
       this.bindings.get(binding.key.id) === binding &&
@@ -119,22 +174,24 @@ export class WorkspaceButtons {
       .then(async () => {
         if (!current()) return;
         await binding.key.setImage(image);
-        if (current()) binding.lastImage = image;
       })
       .catch((error: unknown) => {
-        if (current())
+        if (current()) {
+          binding.desiredImage = undefined;
           this.onError(
             binding.key.id,
             error instanceof Error
               ? error.message
               : "キー表示を更新できません。",
           );
+        }
       });
     this.renders.set(binding.key.id, next);
     void next.then(() => {
       if (this.renders.get(binding.key.id) === next)
         this.renders.delete(binding.key.id);
     });
+    return next;
   }
 
   async press(actionId: string): Promise<void> {

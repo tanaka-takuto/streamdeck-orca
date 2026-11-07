@@ -214,6 +214,24 @@ const imageContains = (context, text) => (message) =>
   message.context === context &&
   decodeURIComponent(message.payload.image).includes(`>${text}</text>`);
 
+test("SDK の画像更新として進行中のアニメーションを送信する", async (t) => {
+  const f = await fixture(t);
+  f.appear("key-main", "key", "main");
+  const first = await f.wait(
+    (message) =>
+      imageContains("key-main", "A")(message) &&
+      decodeURIComponent(message.payload.image).includes("進行中"),
+  );
+  const next = await f.wait(
+    (message) =>
+      imageContains("key-main", "A")(message) &&
+      message.payload.image !== first.payload.image,
+    f.history.length,
+  );
+  assert.match(decodeURIComponent(next.payload.image), /進行中/u);
+  assert.deepEqual(f.switches(), [], "アニメーションで画面を移動しない");
+});
+
 test("SDK の回転イベントで同じ ID のキーだけを切り替え、押したときだけ最新の対象を開く", async (t) => {
   const f = await fixture(t);
   f.appear("key-main", "key", "main");

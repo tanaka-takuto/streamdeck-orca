@@ -134,3 +134,98 @@ test("別のキーを押した後に古い要求で画面を奪わない", async
   assert.equal(guards[0](), false);
   assert.equal(guards[1](), true);
 });
+
+test("進行中だけキー画像が連続して変わり、入力待ちになると止まる", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = fixture();
+  t.after(() => f.buttons.unbind(f.key.id));
+  f.buttons.bind(f.key, { workspaceId: "a" });
+  f.emit(snapshot([workspace("a", "作業 A", "working")]));
+  await tick();
+  const initial = f.images.at(-1);
+  t.mock.timers.tick(100);
+  await tick();
+  assert.notEqual(f.images.at(-1), initial, "進行中の画像が動く");
+  assert.match(f.images.at(-1), /作業 A/u);
+  assert.match(f.images.at(-1), /進行中/u);
+  f.emit(snapshot([workspace("a", "作業 A", "waiting")]));
+  await tick();
+  const stopped = f.images.length;
+  t.mock.timers.tick(1_000);
+  await tick();
+  assert.equal(f.images.length, stopped, "入力待ちの画像を繰り返し送信しない");
+  assert.match(f.images.at(-1), /入力待ち/u);
+});
+
+test("接続失敗・キー消失・割り当て変更で以前のアニメーションを止める", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = fixture();
+  t.after(() => f.buttons.unbind(f.key.id));
+  f.buttons.bind(f.key, { workspaceId: "a" });
+  f.emit(snapshot([workspace("a", "A", "working")]));
+  await tick();
+  t.mock.timers.tick(100);
+  await tick();
+  assert.ok(new Set(f.images).size > 1, "進行中のフレームが更新される");
+  f.emit({ snapshot: null, error: "offline" });
+  await tick();
+  let stopped = f.images.length;
+  t.mock.timers.tick(500);
+  await tick();
+  assert.equal(f.images.length, stopped);
+  assert.match(f.images.at(-1), /状態不明/u);
+  f.emit(snapshot([workspace("a", "A", "working")]));
+  await tick();
+  f.buttons.unbind(f.key.id);
+  stopped = f.images.length;
+  t.mock.timers.tick(500);
+  await tick();
+  assert.equal(f.images.length, stopped);
+  f.buttons.bind(f.key, { workspaceId: "b", workspaceName: "B" });
+  f.emit(
+    snapshot([workspace("a", "A", "working"), workspace("b", "B", "done")]),
+  );
+  await tick();
+  stopped = f.images.length;
+  t.mock.timers.tick(500);
+  await tick();
+  assert.equal(f.images.length, stopped);
+  assert.match(f.images.at(-1), />B<|返答あり/u);
+});
+
+test("画像送信が遅くてもフレームを溜めず、切り替え後に古い表示を送らない", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = fixture();
+  t.after(() => f.buttons.unbind(f.key.id));
+  f.buttons.bind(f.key, { workspaceId: "a" });
+  f.emit(snapshot([workspace("a", "A", "working")]));
+  await tick();
+  const original = f.key.setImage;
+  let finish;
+  f.key.setImage = async (image) => {
+    await original(image);
+    await new Promise((resolve) => {
+      finish = resolve;
+    });
+  };
+  const start = f.images.length;
+  t.mock.timers.tick(100);
+  await tick();
+  assert.equal(f.images.length, start + 1, "アニメーションの送信が始まる");
+  t.mock.timers.tick(5_000);
+  await tick();
+  assert.equal(
+    f.images.length,
+    start + 1,
+    "遅い送信が終わるまで次のフレームを送らない",
+  );
+  f.emit(snapshot([workspace("a", "A", "waiting")]));
+  f.key.setImage = original;
+  finish();
+  await tick();
+  const waiting = f.images.length;
+  assert.match(f.images.at(-1), /入力待ち/u);
+  t.mock.timers.tick(1_000);
+  await tick();
+  assert.equal(f.images.length, waiting);
+});
