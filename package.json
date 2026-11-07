@@ -1,0 +1,18 @@
+{
+  "name": "streamdeck-orca",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Stream Deck + から Orca を操作するプラグイン",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6"
+  }
+}
