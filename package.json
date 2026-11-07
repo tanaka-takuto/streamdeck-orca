@@ -1,6 +1,6 @@
 {
   "name": "streamdeck-orca",
-  "version": "0.0.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Stream Deck + から Orca を操作するプラグイン",
@@ -8,11 +8,26 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "build": "npm run typecheck && node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "validate": "streamdeck validate --no-update-check com.tanaka-takuto.orca.sdPlugin",
+    "link": "streamdeck link com.tanaka-takuto.orca.sdPlugin",
+    "restart": "streamdeck restart com.tanaka-takuto.orca",
+    "pack": "npm run build && streamdeck pack --no-update-check com.tanaka-takuto.orca.sdPlugin --output dist --force",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "node --test"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.6.6"
+    "@biomejs/biome": "2.6.6",
+    "@elgato/cli": "1.10.4",
+    "@types/node": "20.19.43",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "ws": "8.19.0"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "2.1.2"
   }
 }

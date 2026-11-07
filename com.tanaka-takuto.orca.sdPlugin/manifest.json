@@ -1,0 +1,65 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "Orca",
+  "Version": "0.2.0.0",
+  "Author": "tanaka-takuto",
+  "Description": "Orca のワークスペースごとにエージェントの状態を表示し、対象のターミナルを開きます。",
+  "UUID": "com.tanaka-takuto.orca",
+  "Category": "Orca",
+  "CategoryIcon": "imgs/category-icon",
+  "Icon": "imgs/plugin-icon",
+  "CodePath": "bin/plugin.cjs",
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.9"
+  },
+  "Nodejs": {
+    "Version": "20"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "12"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Actions": [
+    {
+      "Name": "ワークスペースの状態",
+      "UUID": "com.tanaka-takuto.orca.workspace-status",
+      "Icon": "imgs/action-icon",
+      "Tooltip": "同じ操作 ID のダイヤルでワークスペースを選び、キーを押すと開きます。",
+      "PropertyInspectorPath": "ui/workspace-status.html",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "imgs/key",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "Name": "ワークスペース切り替え",
+      "UUID": "com.tanaka-takuto.orca.workspace-dial",
+      "Icon": "imgs/action-icon",
+      "Tooltip": "回転すると、同じ操作 ID のキーに表示するワークスペースを切り替えます。",
+      "PropertyInspectorPath": "ui/workspace-status.html",
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "ui/workspace-dial.json",
+        "TriggerDescription": {
+          "Rotate": "同じ操作 ID のキーのワークスペースを選ぶ"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/key",
+          "ShowTitle": false
+        }
+      ]
+    }
+  ]
+}

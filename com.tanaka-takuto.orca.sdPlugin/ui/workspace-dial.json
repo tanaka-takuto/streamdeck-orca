@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/layout.json",
+  "id": "workspace-dial",
+  "items": [
+    {
+      "key": "title",
+      "type": "text",
+      "rect": [12, 7, 176, 20],
+      "font": { "size": 13 },
+      "alignment": "left"
+    },
+    {
+      "key": "workspace",
+      "type": "text",
+      "rect": [12, 33, 176, 30],
+      "font": { "size": 18, "weight": 600 },
+      "alignment": "left"
+    },
+    {
+      "key": "position",
+      "type": "text",
+      "rect": [12, 72, 176, 20],
+      "font": { "size": 13 },
+      "alignment": "right"
+    }
+  ]
+}
