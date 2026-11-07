@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orca アクティブAIに入力</title>
+    <link rel="stylesheet" href="workspace-status.css" />
+    <link rel="stylesheet" href="workspace-command.css" />
+    <script src="active-ai-input.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">ORCA / INPUT</p>
+      <h1>アクティブAIに入力</h1>
+      <p class="description">Orca で選択中の AI ターミナルに、登録した文字列を追加入力します。ダイヤルや操作 ID の設定は不要です。</p>
+      <form id="command-form">
+        <label for="label">ボタンの表示名</label>
+        <input id="label" type="text" maxlength="40" placeholder="例: 続けて、レビュー" disabled />
+        <label for="body">入力する文字列</label>
+        <textarea id="body" rows="6" maxlength="16000" spellcheck="false" placeholder="例: その方針で続けてください" disabled></textarea>
+        <label class="checkbox-row" for="enter"><input id="enter" type="checkbox" disabled />Enterも送る</label>
+        <p class="hint">オフなら入力のみ。複数行はペーストとして入力します。オンなら入力後に Enter を送ります。</p>
+        <div class="save-row"><button id="save" type="submit" disabled>保存</button></div>
+      </form>
+      <p id="message" role="status" aria-live="polite">Stream Deck に接続しています…</p>
+      <section class="selection" aria-label="直近のキー操作">
+        <p class="selection-label">直近のキー操作</p>
+        <p id="last-result" role="status">まだ入力していません。</p>
+      </section>
+      <p class="note">既存の入力は消しません。Enter を送る場合は既存の入力も含めて送信します。入力先の AI ターミナルを Orca で選択してからキーを押してください。</p>
+      <p class="note">現在は macOS / Linux のローカル AI ターミナルが対象です。ネイティブ Chat は対象外です。</p>
+      <p class="note">Orca の保存済みの選択状態を参照します。ワークスペースやペインの切り替え直後は反映が遅れる場合があるため、少し待ってから押してください。</p>
+    </main>
+  </body>
+</html>

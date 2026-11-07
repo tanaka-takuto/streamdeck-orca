@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
   chmodSync,
   copyFileSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -20,6 +21,7 @@ const actions = {
   key: "com.tanaka-takuto.orca.workspace-status",
   dial: "com.tanaka-takuto.orca.workspace-dial",
   command: "com.tanaka-takuto.orca.workspace-command",
+  active: "com.tanaka-takuto.orca.active-ai-input",
 };
 const info = {
   application: {
@@ -29,7 +31,7 @@ const info = {
     language: "ja",
     font: "Arial",
   },
-  plugin: { uuid: "com.tanaka-takuto.orca", version: "0.3.0.0" },
+  plugin: { uuid: "com.tanaka-takuto.orca", version: "0.4.0.0" },
   devices: [
     {
       id: device,
@@ -39,6 +41,48 @@ const info = {
     },
   ],
 };
+
+test("専用キーは画面の選択中 AI に入力し、保存時は入力せず、Enter は設定時だけ送る", {
+  skip: process.platform === "win32",
+}, async (t) => {
+  const f = await fixture(t);
+  f.setActiveSelection("a");
+  f.appear("input", "active", "unused", { body: "入力だけ" });
+  await f.wait((m) => m.event === "setImage" && m.context === "input");
+  assert.deepEqual(f.executions(), []);
+  f.setActiveSelection("b");
+  f.send("keyDown", "input", "active");
+  f.send("keyDown", "input", "active");
+  await f.wait((m) => m.event === "showOk" && m.context === "input");
+  assert.deepEqual(f.executions(), [
+    [
+      "terminal",
+      "send",
+      "--terminal",
+      "fresh-b",
+      "--text",
+      "入力だけ",
+      "--json",
+    ],
+  ]);
+  const start = f.history.length;
+  f.send("didReceiveSettings", "input", "active", {
+    settings: { body: "送信する", enter: true },
+  });
+  f.setActiveSelection("a");
+  f.send("keyDown", "input", "active");
+  await f.wait((m) => m.event === "showOk" && m.context === "input", start);
+  assert.deepEqual(f.executions().at(-1), [
+    "terminal",
+    "send",
+    "--terminal",
+    "fresh-a",
+    "--text",
+    "送信する",
+    "--enter",
+    "--json",
+  ]);
+});
 const row = (id, agentState = "working") => ({
   worktreeId: id,
   displayName: id.toUpperCase(),
@@ -80,7 +124,8 @@ async function fixture(t, saved = {}) {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 const data = JSON.parse(fs.readFileSync(${JSON.stringify(dataPath)}, 'utf8'));
-if (args[0] === 'worktree') console.log(JSON.stringify(data));
+if (args[0] === 'status') console.log(JSON.stringify({ok:true,_meta:data._meta,result:{app:{running:true,desktopWindowStatus:'available'}}}));
+else if (args[0] === 'worktree') console.log(JSON.stringify(data));
 else if (args[1] === 'list') {
  const id = args[args.indexOf('--worktree') + 1].slice(3);
  console.log(JSON.stringify({ok:true,_meta:data._meta,result:{hostScope:{hostIds:['local'],omittedHostIds:[]},truncated:false,terminals:[{handle:'fresh-'+id,incarnationId:'inc-'+id,agentIdentity:'codex',title:'Codex '+id,worktreeId:id,tabId:'tab',leafId:id,executionHostId:'local',connected:true,writable:true,orphaned:false}]}}));
@@ -144,7 +189,11 @@ else if (args[1] === 'list') {
     ],
     {
       cwd: directory,
-      env: { ...process.env, ORCA_CLI_COMMAND: command },
+      env: {
+        ...process.env,
+        ORCA_CLI_COMMAND: command,
+        ORCA_USER_DATA_PATH: directory,
+      },
       stdio: ["ignore", "ignore", "pipe"],
     },
   );
@@ -204,6 +253,38 @@ else if (args[1] === 'list') {
     },
     setRows(ids, waitingIds = []) {
       writeFileSync(dataPath, JSON.stringify(snapshot(ids, waitingIds)));
+    },
+    setActiveSelection(id) {
+      const profile = join(directory, "profiles", "current");
+      mkdirSync(profile, { recursive: true });
+      writeFileSync(
+        join(directory, "orca-runtime.json"),
+        JSON.stringify({ runtimeId: "test-runtime" }),
+      );
+      writeFileSync(
+        join(directory, "orca-profile-index.json"),
+        JSON.stringify({
+          activeProfileId: "current",
+          profiles: [{ id: "current" }],
+        }),
+      );
+      const session = {
+        activeWorktreeId: id,
+        activeWorkspaceKey: `worktree:${id}`,
+        activeTabId: "tab",
+        activeTabTypeByWorktree: { [id]: "terminal" },
+        activeTabIdByWorktree: { [id]: "tab" },
+        tabsByWorktree: { [id]: [{ id: "tab" }] },
+        terminalLayoutsByTabId: { tab: { activeLeafId: id } },
+      };
+      const payload = JSON.stringify(session).replaceAll("'", "''");
+      execFileSync(
+        process.platform === "darwin" ? "/usr/bin/sqlite3" : "sqlite3",
+        [
+          join(profile, "profile-state.db"),
+          `CREATE TABLE IF NOT EXISTS profile_state_documents (domain TEXT PRIMARY KEY, payload TEXT); INSERT OR REPLACE INTO profile_state_documents VALUES ('workspaceSession','${payload}');`,
+        ],
+      );
     },
     executions() {
       try {

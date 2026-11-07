@@ -15,7 +15,11 @@ export type AgentSelection = {
   incarnationId: string;
   identity: string;
 };
-export type AgentTarget = AgentSelection & { name: string; identity: string };
+export type AgentTarget = AgentSelection & {
+  name: string;
+  identity: string;
+  paneKey?: string;
+};
 export type ExecutionSettings = {
   mode?: "shell" | "ai";
   body?: string;
@@ -105,6 +109,10 @@ export class WorkspaceExecutor {
         runtimeId: response.runtimeId,
         incarnationId: row.incarnationId,
         identity: row.agentIdentity,
+        paneKey:
+          typeof row.tabId === "string" && typeof row.leafId === "string"
+            ? `${row.tabId}:${row.leafId}`
+            : undefined,
         name:
           typeof row.title === "string" && row.title
             ? row.title
