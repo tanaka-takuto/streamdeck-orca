@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>確認先を開く</title>
+    <link rel="stylesheet" href="workspace-status.css" />
+    <link rel="stylesheet" href="attention.css" />
+    <script src="attention.js" defer></script>
+  </head>
+  <body><main>
+    <p class="eyebrow">ORCA · 確認先ナビ</p>
+    <h1>確認先を開く</h1>
+    <p class="description">入力待ちや返答の候補を自動で探します。<strong>キーを押すと、表示中の作業場所を開き、次の候補へ進みます。</strong>個別の割り当ては不要です。</p>
+    <section class="selection" aria-labelledby="target-heading">
+      <h2 id="target-heading">次に開く対象</h2>
+      <p id="target-project"></p><p id="target-name">取得しています…</p>
+      <p id="target-path"></p><p id="target-reason"></p>
+      <p id="target-limit" class="note">入力先はOrcaで確認・選択してください。</p>
+    </section>
+    <section class="summary" aria-labelledby="scope-heading">
+      <h2 id="scope-heading">取得範囲の候補</h2>
+      <p id="counts">件数を確認しています…</p>
+      <p class="note">ワークスペース単位です。未読数や残タスク数ではありません。入力待ちには親AIへの待ちも含まれ得ます。</p>
+      <div class="connection"><p id="message" role="status">Stream Deck と接続しています…</p><button id="refresh" type="button" disabled>状態を更新</button></div>
+      <p id="received" class="hint"></p>
+    </section>
+    <section class="result" aria-labelledby="result-heading">
+      <h2 id="result-heading">直近の移動</h2>
+      <p id="result">このキーからはまだ移動していません。</p>
+    </section>
+    <details><summary>操作と対象について</summary>
+      <p>押す：表示中の作業場所を開いて次へ。候補なし：再取得のみ。長押しに追加操作はありません。</p>
+      <p>開いても既読・対応済み・承認済みにはしません。同じ状態が続くと、一巡後に再び表示されます。新しい入力待ちは次の巡回に加わります。</p>
+      <p>入力待ちと返答の混在は入力待ち1件として数えます。進行中の別AIがいても、返答候補を表示します。</p>
+      <p><strong>操作IDで選んだ送信先は変わりません。</strong>例：このキーでBを開いても、Aを選んだ「コマンド・AI指示」キーはAが対象です。「アクティブAIに入力」はOrcaで選択したペインが対象です。どちらも別途キーを押すまで入力しません。</p>
+      <p>該当ペインを特定できない場合はワークスペースを開きます。この機能はAIの起動、文字入力、承認、コマンド実行を行いません。</p>
+    </details>
+  </main></body>
+</html>

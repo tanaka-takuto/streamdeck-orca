@@ -1,5 +1,6 @@
 import streamDeck from "@elgato/streamdeck";
 import { ActiveAiInputAction } from "./actions/active-ai-input";
+import { AttentionAction } from "./actions/attention";
 import { WorkspaceCommandAction } from "./actions/workspace-command";
 import {
   WorkspaceDialAction,
@@ -11,6 +12,7 @@ streamDeck.actions.registerAction(new WorkspaceStatusAction());
 streamDeck.actions.registerAction(new WorkspaceDialAction());
 streamDeck.actions.registerAction(new WorkspaceCommandAction());
 streamDeck.actions.registerAction(new ActiveAiInputAction());
+streamDeck.actions.registerAction(new AttentionAction());
 streamDeck
   .connect()
   .then(() => workspaceService.initialize())

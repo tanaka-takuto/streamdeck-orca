@@ -1,4 +1,5 @@
 import streamDeck, { type DialAction } from "@elgato/streamdeck";
+import { AttentionButtons } from "./attention-buttons";
 import { commandImage } from "./command-image";
 import { createCliRunner, OrcaClient } from "./orca/client";
 import {
@@ -60,6 +61,15 @@ class WorkspaceService {
   private readonly selectionUpdates = new Map<string, Promise<boolean>>();
   private readonly executions = new Map<string, ExecutionRecord>();
   private navigationVersion = 0;
+  private readonly attention = new AttentionButtons(
+    this.monitor,
+    this.client,
+    () => {
+      const version = ++this.navigationVersion;
+      return () => this.navigationVersion === version;
+    },
+    (id, message) => this.report(id, message),
+  );
   private globalSettings: GlobalSettings = {};
   private settingsReady = false;
   private saveTimer?: ReturnType<typeof setTimeout>;
@@ -195,7 +205,26 @@ class WorkspaceService {
     const binding = this.bindings.get(actionId);
     this.bindings.delete(actionId);
     this.buttons.unbind(actionId);
+    this.attention.unbind(actionId);
     binding?.stop?.();
+  }
+
+  bindAttention(key: WorkspaceKey): void {
+    this.unbind(key.id);
+    this.attention.bind(key);
+  }
+  async pressAttention(id: string): Promise<void> {
+    await this.attention.press(id);
+  }
+  async sendAttentionView(id: string, requestId: string): Promise<void> {
+    const view = await this.attention.inspectorView(id);
+    if (view && streamDeck.ui.action?.id === id)
+      await streamDeck.ui.sendToPropertyInspector({
+        type: "attention-view",
+        actionId: id,
+        requestId,
+        view,
+      });
   }
 
   bindCommand(

@@ -1,0 +1,88 @@
+h2 {
+  font-size: 11px;
+  color: #a8b6c6;
+  margin: 0 0 10px;
+}
+#target-project {
+  color: #b8bec6;
+  font-size: 12px;
+  margin: 0 0 5px;
+}
+#target-name {
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.5;
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+#target-path {
+  font-size: 10px;
+  color: #a1aeba;
+  overflow-wrap: anywhere;
+  margin: 0 0 9px;
+}
+#target-reason {
+  margin: 0;
+  font-weight: 600;
+  color: #f2d18c;
+  line-height: 1.6;
+}
+.summary,
+.result {
+  margin: 20px 0;
+  line-height: 1.7;
+}
+#counts {
+  font-size: 13px;
+  margin: 0;
+}
+.summary .note {
+  margin: 8px 0 12px;
+}
+.connection {
+  align-items: center;
+}
+.connection button {
+  min-height: 36px;
+}
+#received {
+  margin-bottom: 0;
+}
+.result {
+  border-top: 1px solid #3b4149;
+  padding-top: 17px;
+}
+#result {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+details {
+  font-size: 11px;
+  color: #b8bec6;
+  line-height: 1.7;
+  border-top: 1px solid #3b4149;
+  padding-top: 16px;
+}
+summary {
+  cursor: pointer;
+  color: #edf0f3;
+  min-height: 28px;
+}
+summary:focus-visible {
+  outline: 2px solid #69b4ff;
+  outline-offset: 2px;
+}
+@media (max-width: 320px) {
+  main {
+    padding: 16px 12px;
+  }
+  .connection {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .connection button {
+    align-self: flex-start;
+  }
+}

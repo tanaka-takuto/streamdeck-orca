@@ -22,6 +22,7 @@ const actions = {
   dial: "com.tanaka-takuto.orca.workspace-dial",
   command: "com.tanaka-takuto.orca.workspace-command",
   active: "com.tanaka-takuto.orca.active-ai-input",
+  attention: "com.tanaka-takuto.orca.attention",
 };
 const info = {
   application: {
@@ -257,6 +258,9 @@ else if (args[1] === 'list') {
         JSON.stringify({ ...snapshot(ids, waitingIds), testDelayMs }),
       );
     },
+    setSnapshot(value) {
+      writeFileSync(dataPath, JSON.stringify(value));
+    },
     setActiveSelection(id) {
       const profile = join(directory, "profiles", "current");
       mkdirSync(profile, { recursive: true });
@@ -315,6 +319,55 @@ const imageContains = (context, text) => (message) =>
   message.event === "setImage" &&
   message.context === context &&
   decodeURIComponent(message.payload.image).includes(`>${text}</text>`);
+
+test("確認先キーだけで待ちと返答を一巡し、固定IDの宛先と件数を変えず送信しない", async (t) => {
+  const f = await fixture(t, {
+    workspaceSelections: { main: { workspaceId: "b", workspaceName: "B" } },
+  });
+  const s = snapshot(["a", "b", "c"], ["a", "b"]);
+  s.result.worktrees[2].agents[0].state = "done";
+  f.setSnapshot(s);
+  f.appear("nav", "attention");
+  f.appear("fixed", "key", "main");
+  await f.wait(imageContains("nav", "A"));
+  for (const [id, next] of [
+    ["a", "B"],
+    ["b", "C"],
+    ["c", "A"],
+  ]) {
+    const start = f.history.length;
+    f.send("keyDown", "nav", "attention");
+    await f.wait(imageContains("nav", next), start);
+    assert.equal(f.switches().at(-1)[3], `fresh-${id}`);
+  }
+  assert.equal(f.switches().length, 3);
+  assert.deepEqual(f.executions(), []);
+  assert.equal(f.settings.workspaceSelections.main.workspaceId, "b");
+  assert.ok(
+    f.history
+      .filter((m) => m.context === "nav" && m.event === "setImage")
+      .some((m) =>
+        decodeURIComponent(m.payload.image).includes("入力 2 · 返答 1"),
+      ),
+  );
+});
+test("確認先の消失後は表示を更新するが、その押下で代わりの相手を開かない", async (t) => {
+  const f = await fixture(t);
+  f.setRows(["a", "b"], ["a", "b"]);
+  f.appear("nav", "attention");
+  await f.wait(imageContains("nav", "A"));
+  f.setRows(["b"], ["b"]);
+  f.send("keyDown", "nav", "attention");
+  await f.wait((m) => m.event === "showAlert" && m.context === "nav");
+  assert.deepEqual(f.switches(), []);
+  await f.wait(imageContains("nav", "B"));
+  const start = f.history.length;
+  f.send("keyDown", "nav", "attention");
+  await f.wait(imageContains("nav", "開いています"), start);
+  const opening = f.history.length;
+  await f.wait(imageContains("nav", "押して開く"), opening);
+  assert.equal(f.switches().at(-1)[3], "fresh-b");
+});
 
 test("旧ページが先に消えても、状態キー1個と2個の切替で不明を挟まず最新状態へ更新する", async (t) => {
   for (const [oldCount, nextCount] of [

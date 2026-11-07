@@ -28,6 +28,7 @@ export type OrcaSnapshot = {
   runtimeId: string;
   workspaces: OrcaWorkspace[];
   truncated: boolean;
+  omittedHosts?: boolean;
 };
 
 export type OrcaTerminal = {
@@ -142,7 +143,13 @@ export function parseSnapshot(value: unknown): OrcaSnapshot {
             : ("unverifiable" as const),
       };
     });
-  return { runtimeId, workspaces, truncated: result.truncated !== false };
+  const omitted = object(result.hostScope).omittedHostIds;
+  return {
+    runtimeId,
+    workspaces,
+    truncated: result.truncated !== false,
+    omittedHosts: !Array.isArray(omitted) || omitted.length > 0,
+  };
 }
 
 export function getWorkspaceStatus(workspace?: OrcaWorkspace): WorkspaceStatus {

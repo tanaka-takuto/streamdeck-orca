@@ -2,6 +2,11 @@ import { execFile } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { delimiter, join } from "node:path";
 import {
+  type AttentionTarget,
+  attentionWorkspace,
+  matchesAttentionTarget,
+} from "../attention";
+import {
   type OrcaSnapshot,
   type OrcaTerminal,
   object,
@@ -88,14 +93,24 @@ export class OrcaClient {
   async focusWorkspace(
     workspaceId: string,
     isCurrent = () => true,
+    expected?: AttentionTarget,
   ): Promise<boolean> {
     const snapshot = await this.snapshot();
     if (!isCurrent()) return false;
-    const workspace = snapshot.workspaces.find((row) => row.id === workspaceId);
+    if (
+      expected &&
+      (workspaceId !== expected.workspaceId ||
+        !matchesAttentionTarget(snapshot, expected))
+    )
+      throw new Error(
+        "表示した候補の状態または実行環境が変わりました。対象を確認して、もう一度押してください。",
+      );
+    let workspace = snapshot.workspaces.find((row) => row.id === workspaceId);
     if (!workspace)
       throw new Error(
         "割り当てたワークスペースを取得できません。設定を確認してください。",
       );
+    if (expected) workspace = attentionWorkspace(workspace);
     if (
       workspace.terminalVerdict === "none" ||
       workspace.terminalVerdict === "exited"
