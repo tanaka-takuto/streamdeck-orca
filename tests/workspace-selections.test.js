@@ -147,6 +147,21 @@ const waitingRow = (id) => ({
   agents: [{ paneKey: `tab:${id}`, state: "waiting" }],
 });
 
+test("再取得中の保持データは表示だけに使い、新規割り当てやダイヤル操作には使わない", () => {
+  const f = fixture({ known: { workspaceId: "b", workspaceName: "B" } });
+  f.selections.subscribe("new", () => {});
+  f.selections.subscribe("known", () => {});
+  f.emit({ ...state([waitingRow("a"), row("b")]), fromCache: true });
+  assert.equal(f.selections.view("new").workspaceId, undefined);
+  assert.equal(f.selections.view("known").status, "working");
+  f.selections.rotate("known", 1);
+  assert.equal(f.selections.view("known").workspaceId, "b");
+  assert.equal(f.selections.selectNextWaiting("known"), false);
+  assert.deepEqual(f.changes, []);
+  f.emit(state([row("fresh")]));
+  assert.equal(f.selections.view("new").workspaceId, "fresh");
+});
+
 test("押し込みは現在位置の次から入力待ちだけを順送りし、同じ ID の表示に反映する", () => {
   const f = fixture({ main: { workspaceId: "c", workspaceName: "c" } });
   const key = [],

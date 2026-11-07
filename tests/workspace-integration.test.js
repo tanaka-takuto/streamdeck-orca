@@ -31,7 +31,7 @@ const info = {
     language: "ja",
     font: "Arial",
   },
-  plugin: { uuid: "com.tanaka-takuto.orca", version: "0.4.0.0" },
+  plugin: { uuid: "com.tanaka-takuto.orca", version: "0.4.1.0" },
   devices: [
     {
       id: device,
@@ -125,7 +125,7 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 const data = JSON.parse(fs.readFileSync(${JSON.stringify(dataPath)}, 'utf8'));
 if (args[0] === 'status') console.log(JSON.stringify({ok:true,_meta:data._meta,result:{app:{running:true,desktopWindowStatus:'available'}}}));
-else if (args[0] === 'worktree') console.log(JSON.stringify(data));
+else if (args[0] === 'worktree') setTimeout(() => console.log(JSON.stringify(data)), data.testDelayMs || 0);
 else if (args[1] === 'list') {
  const id = args[args.indexOf('--worktree') + 1].slice(3);
  console.log(JSON.stringify({ok:true,_meta:data._meta,result:{hostScope:{hostIds:['local'],omittedHostIds:[]},truncated:false,terminals:[{handle:'fresh-'+id,incarnationId:'inc-'+id,agentIdentity:'codex',title:'Codex '+id,worktreeId:id,tabId:'tab',leafId:id,executionHostId:'local',connected:true,writable:true,orphaned:false}]}}));
@@ -251,8 +251,11 @@ else if (args[1] === 'list') {
         state: 0,
       });
     },
-    setRows(ids, waitingIds = []) {
-      writeFileSync(dataPath, JSON.stringify(snapshot(ids, waitingIds)));
+    setRows(ids, waitingIds = [], testDelayMs = 0) {
+      writeFileSync(
+        dataPath,
+        JSON.stringify({ ...snapshot(ids, waitingIds), testDelayMs }),
+      );
     },
     setActiveSelection(id) {
       const profile = join(directory, "profiles", "current");
@@ -312,6 +315,52 @@ const imageContains = (context, text) => (message) =>
   message.event === "setImage" &&
   message.context === context &&
   decodeURIComponent(message.payload.image).includes(`>${text}</text>`);
+
+test("旧ページが先に消えても、状態キー1個と2個の切替で不明を挟まず最新状態へ更新する", async (t) => {
+  for (const [oldCount, nextCount] of [
+    [1, 2],
+    [2, 1],
+  ]) {
+    await t.test(`${oldCount}個から${nextCount}個`, async (t) => {
+      const f = await fixture(t, {
+        workspaceSelections: {
+          slot0: { workspaceId: "a", workspaceName: "A" },
+          slot1: { workspaceId: "b", workspaceName: "B" },
+        },
+      });
+      f.setRows(["a", "b"], [], 150);
+      for (let i = 0; i < oldCount; i++)
+        f.appear(`old-${i}`, "key", `slot${i}`);
+      for (let i = 0; i < oldCount; i++)
+        await f.wait(imageContains(`old-${i}`, "進行中"));
+      f.setRows(["a", "b"], ["a", "b"], 150);
+      const start = f.history.length;
+      for (let i = 0; i < oldCount; i++)
+        f.send("willDisappear", `old-${i}`, "key");
+      for (let i = 0; i < nextCount; i++)
+        f.appear(`new-${i}`, "key", `slot${i}`);
+      for (let i = 0; i < nextCount; i++) {
+        const first = await f.wait(
+          (m) => m.event === "setImage" && m.context === `new-${i}`,
+          start,
+        );
+        assert.match(decodeURIComponent(first.payload.image), /進行中/u);
+        await f.wait(imageContains(`new-${i}`, "入力待ち"), start);
+      }
+      assert.equal(
+        f.history
+          .slice(start)
+          .some(
+            (m) =>
+              m.event === "setImage" &&
+              m.context.startsWith("new-") &&
+              decodeURIComponent(m.payload.image).includes("状態不明"),
+          ),
+        false,
+      );
+    });
+  }
+});
 
 test("SDK の画像更新として進行中のアニメーションを送信する", async (t) => {
   const f = await fixture(t);

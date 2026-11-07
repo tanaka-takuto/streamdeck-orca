@@ -100,7 +100,12 @@ export class WorkspaceSelections {
   }
 
   private ensureSelection(id: string): void {
-    if (this.ready && !this.selections.has(id) && this.catalog.length)
+    if (
+      this.ready &&
+      !this.state.fromCache &&
+      !this.selections.has(id) &&
+      this.catalog.length
+    )
       this.choose(id, this.catalog[0]);
   }
 
@@ -116,6 +121,7 @@ export class WorkspaceSelections {
     if (
       !this.ready ||
       !this.state.snapshot ||
+      this.state.fromCache ||
       !this.catalog.length ||
       !Number.isFinite(ticks)
     )
@@ -135,7 +141,12 @@ export class WorkspaceSelections {
   }
 
   selectNextWaiting(controlId: string): boolean {
-    if (!this.ready || !this.state.snapshot || !this.catalog.length)
+    if (
+      !this.ready ||
+      !this.state.snapshot ||
+      this.state.fromCache ||
+      !this.catalog.length
+    )
       return false;
     const id = normalizeControlId(controlId);
     const selected = this.selections.get(id)?.workspaceId;
