@@ -54,6 +54,31 @@ type ExecutionRecord = {
 };
 
 class WorkspaceService {
+  beginNavigation(): () => boolean {
+    const version = ++this.navigationVersion;
+    return () => this.navigationVersion === version;
+  }
+  observeControl(controlId: string, listener: () => void): () => void {
+    return this.selections.subscribe(controlId, listener);
+  }
+  controlContext(controlId: string) {
+    return {
+      view: this.selections.view(controlId),
+      catalog: this.monitor.state.snapshot?.workspaces ?? [],
+      runtimeId: this.monitor.state.snapshot?.runtimeId,
+      unavailable:
+        !this.monitor.state.snapshot ||
+        !!this.monitor.state.error ||
+        !!this.monitor.state.fromCache,
+      partial:
+        !!this.monitor.state.snapshot?.truncated ||
+        !!this.monitor.state.snapshot?.omittedHosts,
+    };
+  }
+  async freshControlContext(controlId: string) {
+    await this.monitor.refresh();
+    return this.controlContext(controlId);
+  }
   private readonly runner = createCliRunner();
   private readonly client = new OrcaClient(this.runner);
   private readonly executor = new WorkspaceExecutor(this.client, this.runner);

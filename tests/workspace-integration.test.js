@@ -18,6 +18,7 @@ import { WebSocketServer } from "ws";
 
 const device = "test-deck";
 const actions = {
+  radar: "com.tanaka-takuto.orca.change-radar",
   key: "com.tanaka-takuto.orca.workspace-status",
   dial: "com.tanaka-takuto.orca.workspace-dial",
   command: "com.tanaka-takuto.orca.workspace-command",
@@ -145,7 +146,8 @@ async function fixture(t, saved = {}) {
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 const data = JSON.parse(fs.readFileSync(${JSON.stringify(dataPath)}, 'utf8'));
-if (args[0] === 'status') console.log(JSON.stringify({ok:true,_meta:data._meta,result:{app:{running:true,desktopWindowStatus:'available'}}}));
+if(args[0] === 'file'){fs.appendFileSync(${JSON.stringify(executionsPath)},JSON.stringify(args)+'\\n');console.log(JSON.stringify({ok:true,_meta:data._meta,result:{opened:true,kind:'text'}}));}
+else if (args[0] === 'status') console.log(JSON.stringify({ok:true,_meta:data._meta,result:{app:{running:true,desktopWindowStatus:'available'}}}));
 else if (args[0] === 'worktree') setTimeout(() => console.log(JSON.stringify(data)), data.testDelayMs || 0);
 else if (args[1] === 'list') {
  const id = args[args.indexOf('--worktree') + 1].slice(3);
@@ -247,6 +249,7 @@ else if (args[1] === 'list') {
     });
   await wait((message) => message.event === "registerPlugin");
   return {
+    directory,
     wait,
     history,
     get settings() {
@@ -265,7 +268,7 @@ else if (args[1] === 'list') {
     },
     appear(context, kind, controlId, extra = {}) {
       this.send("willAppear", context, kind, {
-        controller: kind === "dial" ? "Encoder" : "Keypad",
+        controller: ["dial", "radar"].includes(kind) ? "Encoder" : "Keypad",
         coordinates: { column: 0, row: 0 },
         isInMultiAction: false,
         settings: { controlId, ...extra },
@@ -308,6 +311,8 @@ else if (args[1] === 'list') {
       execFileSync(
         process.platform === "darwin" ? "/usr/bin/sqlite3" : "sqlite3",
         [
+          "-cmd",
+          ".timeout 5000",
           join(profile, "profile-state.db"),
           `CREATE TABLE IF NOT EXISTS profile_state_documents (domain TEXT PRIMARY KEY, payload TEXT); INSERT OR REPLACE INTO profile_state_documents VALUES ('workspaceSession','${payload}');`,
         ],
@@ -735,4 +740,67 @@ test("AI ボタンで指示を送り、古いプロセスを指定した設定�
   f.send("keyDown", "run", "command");
   await f.wait((m) => m.event === "showAlert" && m.context === "run", start);
   assert.equal(f.executions().length, 1);
+});
+
+test("実GitとSDKのレーダー押下/タップから両WSのコード行へ移動する", async (t) => {
+  const f = await fixture(t),
+    a = join(f.directory, "git-a"),
+    b = join(f.directory, "git-b");
+  mkdirSync(a);
+  const git = (cwd, ...args) =>
+    execFileSync(
+      "git",
+      [
+        "-c",
+        "user.name=SDK Test",
+        "-c",
+        "user.email=sdk@example.test",
+        ...args,
+      ],
+      { cwd, stdio: ["ignore", "pipe", "pipe"] },
+    );
+  git(a, "init", "-b", "main");
+  writeFileSync(join(a, "shared.txt"), "one\ntwo\nthree\n");
+  git(a, "add", ".");
+  git(a, "commit", "-m", "base");
+  git(a, "worktree", "add", "-b", "peer", b);
+  writeFileSync(join(a, "shared.txt"), "one\nleft\nthree\n");
+  writeFileSync(join(b, "shared.txt"), "one\nright\nthree\n");
+  const data = snapshot(["a", "b"]);
+  data.result.worktrees[0].path = a;
+  data.result.worktrees[1].path = b;
+  f.setSnapshot(data);
+  f.appear("radar", "radar", "main");
+  await f.wait(
+    (m) =>
+      m.event === "setFeedback" &&
+      m.context === "radar" &&
+      m.payload.title.includes("同じ行域"),
+  );
+  const afterOpen = f.history.length;
+  f.send("dialDown", "radar", "radar");
+  await f.wait(
+    (m) =>
+      m.event === "setFeedback" &&
+      m.context === "radar" &&
+      m.payload.operation === "押:自コード / 触:相コード" &&
+      f.executions().length === 1,
+    afterOpen,
+  );
+  f.send("touchTap", "radar", "radar", { hold: false, tapPos: [20, 20] });
+  await f.wait(
+    (m) =>
+      m.event === "setFeedback" &&
+      m.context === "radar" &&
+      f.executions().length === 2,
+  );
+  const calls = f.executions();
+  assert.equal(calls[0][calls[0].indexOf("--worktree") + 1], "id:a");
+  assert.equal(calls[1][calls[1].indexOf("--worktree") + 1], "id:b");
+  assert.ok(
+    calls.every(
+      (x) =>
+        x.includes("--path=shared.txt") && x[x.indexOf("--line") + 1] === "2",
+    ),
+  );
 });

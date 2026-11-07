@@ -19,6 +19,7 @@ export type OrcaWorkspace = {
   project: string;
   path: string;
   hostId: string;
+  instanceId?: string;
   agents: OrcaAgent[];
   activity: string;
   terminalVerdict: "live" | "exited" | "none" | "unverifiable";
@@ -130,6 +131,9 @@ export function parseSnapshot(value: unknown): OrcaSnapshot {
         project: text(row.repo),
         path: row.path,
         hostId,
+        ...(typeof row.worktreeInstanceId === "string"
+          ? { instanceId: row.worktreeInstanceId }
+          : {}),
         agents: covered
           ? agents
           : agents.map((agent) => ({ ...agent, state: "unknown" as const })),

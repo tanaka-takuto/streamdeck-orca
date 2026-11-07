@@ -1,7 +1,7 @@
 {
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "Name": "Orca",
-  "Version": "0.6.0.0",
+  "Version": "0.7.0.0",
   "Author": "tanaka-takuto",
   "Description": "Orca のワークスペース状態の表示・切り替え、シェルコマンドの実行、AIへの指示送信を行います。",
   "UUID": "com.tanaka-takuto.orca",
@@ -95,6 +95,28 @@
         "TriggerDescription": {
           "Rotate": "同じ操作 ID のキーのワークスペースを選ぶ",
           "Push": "次の入力待ちワークスペースを選ぶ"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/key",
+          "ShowTitle": false
+        }
+      ]
+    },
+    {
+      "Name": "並列変更レーダー",
+      "UUID": "com.tanaka-takuto.orca.change-radar",
+      "Icon": "imgs/action-icon",
+      "Tooltip": "別ワークスペースと共通する変更箇所を探し、双方のコードへ移動します。",
+      "PropertyInspectorPath": "ui/change-radar.html",
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "ui/change-radar.json",
+        "TriggerDescription": {
+          "Rotate": "接点を選ぶ",
+          "Push": "自分側のコードを開く",
+          "Touch": "相手側のコードを開く"
         }
       },
       "States": [
