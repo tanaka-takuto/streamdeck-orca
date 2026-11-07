@@ -10,6 +10,7 @@ export type WorkspaceKey = {
   id: string;
   setImage(image: string): Promise<void>;
   showAlert(): Promise<void>;
+  showOk?(): Promise<void>;
 };
 
 type DisplayStatus = WorkspaceStatus | "unassigned";

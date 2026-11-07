@@ -1,5 +1,12 @@
 import streamDeck, { type DialAction } from "@elgato/streamdeck";
-import { OrcaClient } from "./orca/client";
+import { commandImage } from "./command-image";
+import { createCliRunner, OrcaClient } from "./orca/client";
+import {
+  type AgentDirectory,
+  type ExecutionResult,
+  type ExecutionSettings,
+  WorkspaceExecutor,
+} from "./orca/execution";
 import { WorkspaceMonitor } from "./orca/monitor";
 import { WorkspaceButtons, type WorkspaceKey } from "./workspace-buttons";
 import {
@@ -14,6 +21,7 @@ type GlobalSettings = { workspaceSelections?: Record<string, SavedSelection> };
 type Binding = {
   controlId: string;
   key?: WorkspaceKey;
+  command?: ExecutionSettings;
   stop?: () => void;
   lastSelection?: string;
   renderVersion: number;
@@ -26,9 +34,18 @@ const labels = {
   idle: "待機",
   unknown: "状態不明",
 };
+type ExecutionRecord = {
+  busy: boolean;
+  workspaceId?: string;
+  workspaceName?: string;
+  command?: ExecutionSettings;
+  result?: ExecutionResult;
+};
 
 class WorkspaceService {
-  private readonly client = new OrcaClient();
+  private readonly runner = createCliRunner();
+  private readonly client = new OrcaClient(this.runner);
+  private readonly executor = new WorkspaceExecutor(this.client, this.runner);
   private readonly monitor = new WorkspaceMonitor(this.client);
   private readonly buttons = new WorkspaceButtons(
     this.monitor,
@@ -41,6 +58,7 @@ class WorkspaceService {
   );
   private readonly bindings = new Map<string, Binding>();
   private readonly selectionUpdates = new Map<string, Promise<boolean>>();
+  private readonly executions = new Map<string, ExecutionRecord>();
   private navigationVersion = 0;
   private globalSettings: GlobalSettings = {};
   private settingsReady = false;
@@ -178,6 +196,209 @@ class WorkspaceService {
     this.bindings.delete(actionId);
     this.buttons.unbind(actionId);
     binding?.stop?.();
+  }
+
+  bindCommand(
+    key: WorkspaceKey,
+    settings: ControlSettings & ExecutionSettings,
+  ): void {
+    this.unbind(key.id);
+    const binding: Binding = {
+      key,
+      controlId: normalizeControlId(settings.controlId),
+      command: { ...settings },
+      renderVersion: 0,
+      queue: Promise.resolve(),
+    };
+    this.bindings.set(key.id, binding);
+    binding.stop = this.selections.subscribe(binding.controlId, (view) =>
+      this.renderCommand(binding, view),
+    );
+  }
+
+  private renderCommand(binding: Binding, view: ControlView): void {
+    const key = binding.key;
+    const command = binding.command;
+    if (!key || !command || this.bindings.get(key.id) !== binding) return;
+    const record = this.executions.get(key.id);
+    const last =
+      record?.command === command && record.workspaceId === view.workspaceId
+        ? record.result
+        : undefined;
+    const phases = {
+      accepted: "受付済み",
+      refused: "受付拒否",
+      unknown: "結果未確認",
+      cancelled: "未実行",
+    };
+    const phase = record?.busy
+      ? "要求中"
+      : last
+        ? phases[last.status]
+        : command.body?.trim()
+          ? "押して実行"
+          : "要設定";
+    const name = record?.busy
+      ? (record.workspaceName ?? "選択を更新中")
+      : view.workspaceName;
+    const image = commandImage(
+      name,
+      command.label?.trim() ||
+        (command.mode === "ai" ? "AIへ指示" : "コマンド実行"),
+      command.mode ?? "shell",
+      phase,
+    );
+    if (binding.lastSelection === image) return;
+    binding.lastSelection = image;
+    const version = ++binding.renderVersion;
+    binding.queue = binding.queue
+      .catch(() => {})
+      .then(async () => {
+        if (
+          this.bindings.get(key.id) === binding &&
+          binding.renderVersion === version
+        )
+          await key.setImage(image);
+      });
+    void binding.queue.catch(() => {
+      binding.lastSelection = undefined;
+      this.report(key.id, "コマンドボタンの表示を更新できません。");
+    });
+  }
+
+  async execute(actionId: string): Promise<void> {
+    const binding = this.bindings.get(actionId);
+    if (!binding?.command || !binding.key) return;
+    const record = this.executions.get(actionId) ?? { busy: false };
+    if (record.busy) return;
+    this.executions.set(actionId, record);
+    record.busy = true;
+    record.result = undefined;
+    record.workspaceId = undefined;
+    record.workspaceName = undefined;
+    record.command = binding.command;
+    this.renderCommand(binding, this.selections.view(binding.controlId));
+    try {
+      let pending = this.selectionUpdates.get(binding.controlId);
+      while (pending) {
+        if (!(await pending))
+          throw new Error(
+            "ワークスペース一覧を更新できません。Orca 側を確認してください。",
+          );
+        pending = this.selectionUpdates.get(binding.controlId);
+      }
+      if (this.bindings.get(actionId) !== binding) return;
+      const view = this.selections.view(binding.controlId);
+      if (!view.workspaceId)
+        throw new Error("ダイヤルで対象ワークスペースを選んでください。");
+      record.workspaceId = view.workspaceId;
+      record.workspaceName = view.workspaceName;
+      const current = () =>
+        this.bindings.get(actionId) === binding &&
+        this.selections.view(binding.controlId).workspaceId ===
+          view.workspaceId;
+      this.renderCommand(binding, view);
+      record.result = await this.executor.execute(
+        view.workspaceId,
+        binding.command,
+        current,
+      );
+      if (current()) {
+        if (record.result.status === "accepted")
+          await binding.key
+            .showOk?.()
+            .catch(() =>
+              this.report(
+                actionId,
+                "受付済みですが、キーの確認表示を更新できません。",
+              ),
+            );
+        else if (record.result.status !== "cancelled")
+          await binding.key
+            .showAlert()
+            .catch(() =>
+              this.report(actionId, "キーの警告表示を更新できません。"),
+            );
+      }
+    } catch (error) {
+      record.result = {
+        status: "refused",
+        message:
+          error instanceof Error
+            ? error.message
+            : "実行内容と送信先を確認してください。",
+      };
+      if (this.bindings.get(actionId) === binding) {
+        this.report(actionId, record.result.message);
+        await binding.key
+          .showAlert()
+          .catch(() =>
+            this.report(actionId, "キーの警告表示を更新できません。"),
+          );
+      }
+    } finally {
+      record.busy = false;
+      if (!record.result)
+        record.result = {
+          status: "cancelled",
+          message: "設定が変わったため実行していません。",
+        };
+      const latest = this.bindings.get(actionId);
+      if (latest?.command)
+        this.renderCommand(latest, this.selections.view(latest.controlId));
+    }
+  }
+
+  async sendExecutionView(
+    actionId: string,
+    requestId: string,
+    includeAgents: boolean,
+  ): Promise<void> {
+    const binding = this.bindings.get(actionId);
+    if (!binding?.command) return;
+    await this.monitor.refresh();
+    let pending = this.selectionUpdates.get(binding.controlId);
+    while (pending) {
+      await pending;
+      pending = this.selectionUpdates.get(binding.controlId);
+    }
+    const selected = this.selections.view(binding.controlId);
+    let directory: AgentDirectory | undefined;
+    let targetError: string | undefined;
+    if (includeAgents && selected.workspaceId) {
+      try {
+        directory = await this.executor.agents(selected.workspaceId);
+      } catch (error) {
+        targetError =
+          error instanceof Error
+            ? error.message
+            : "AI の送信先を取得できません。";
+      }
+    }
+    if (
+      this.bindings.get(actionId) !== binding ||
+      streamDeck.ui.action?.id !== actionId
+    )
+      return;
+    const view = this.selections.view(binding.controlId);
+    if (directory?.workspaceId !== view.workspaceId) directory = undefined;
+    const record = this.executions.get(actionId);
+    await streamDeck.ui.sendToPropertyInspector({
+      type: "execution-view",
+      actionId,
+      requestId,
+      controlId: view.controlId,
+      workspaceId: view.workspaceId,
+      workspaceName: view.workspaceName,
+      status: labels[view.status],
+      available: view.available,
+      targets: directory?.targets ?? [],
+      error: view.error ?? targetError,
+      busy: record?.busy ?? false,
+      lastResult: record?.result
+        ? { ...record.result, workspaceName: record.workspaceName ?? "未選択" }
+        : undefined,
+    });
   }
 
   async rotate(actionId: string, ticks: number): Promise<void> {

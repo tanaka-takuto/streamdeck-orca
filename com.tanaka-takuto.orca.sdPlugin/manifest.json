@@ -1,9 +1,9 @@
 {
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "Name": "Orca",
-  "Version": "0.2.0.0",
+  "Version": "0.3.0.0",
   "Author": "tanaka-takuto",
-  "Description": "Orca のワークスペースごとにエージェントの状態を表示し、対象のターミナルを開きます。",
+  "Description": "Orca のワークスペース状態の表示・切り替え、シェルコマンドの実行、AIへの指示送信を行います。",
   "UUID": "com.tanaka-takuto.orca",
   "Category": "Orca",
   "CategoryIcon": "imgs/category-icon",
@@ -27,6 +27,20 @@
     }
   ],
   "Actions": [
+    {
+      "Name": "コマンド・AI指示",
+      "UUID": "com.tanaka-takuto.orca.workspace-command",
+      "Icon": "imgs/action-icon",
+      "Tooltip": "選択したワークスペースでコマンドを実行、または指定した AI へ指示を送ります。",
+      "PropertyInspectorPath": "ui/workspace-command.html",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "imgs/key",
+          "ShowTitle": false
+        }
+      ]
+    },
     {
       "Name": "ワークスペースの状態",
       "UUID": "com.tanaka-takuto.orca.workspace-status",

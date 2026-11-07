@@ -19,6 +19,7 @@ const device = "test-deck";
 const actions = {
   key: "com.tanaka-takuto.orca.workspace-status",
   dial: "com.tanaka-takuto.orca.workspace-dial",
+  command: "com.tanaka-takuto.orca.workspace-command",
 };
 const info = {
   application: {
@@ -28,7 +29,7 @@ const info = {
     language: "ja",
     font: "Arial",
   },
-  plugin: { uuid: "com.tanaka-takuto.orca", version: "0.2.0.0" },
+  plugin: { uuid: "com.tanaka-takuto.orca", version: "0.3.0.0" },
   devices: [
     {
       id: device,
@@ -66,6 +67,7 @@ async function fixture(t, saved = {}) {
   const directory = mkdtempSync(join(tmpdir(), "streamdeck-orca-sdk-"));
   const dataPath = join(directory, "snapshot.json");
   const switchesPath = join(directory, "switches.jsonl");
+  const executionsPath = join(directory, "executions.jsonl");
   writeFileSync(dataPath, JSON.stringify(snapshot(["a", "b"])));
   copyFileSync(
     resolve("com.tanaka-takuto.orca.sdPlugin/manifest.json"),
@@ -81,10 +83,14 @@ const data = JSON.parse(fs.readFileSync(${JSON.stringify(dataPath)}, 'utf8'));
 if (args[0] === 'worktree') console.log(JSON.stringify(data));
 else if (args[1] === 'list') {
  const id = args[args.indexOf('--worktree') + 1].slice(3);
- console.log(JSON.stringify({ok:true,_meta:data._meta,result:{hostScope:{hostIds:['local'],omittedHostIds:[]},truncated:false,terminals:[{handle:'fresh-'+id,worktreeId:id,tabId:'tab',leafId:id,executionHostId:'local',connected:true,orphaned:false}]}}));
+ console.log(JSON.stringify({ok:true,_meta:data._meta,result:{hostScope:{hostIds:['local'],omittedHostIds:[]},truncated:false,terminals:[{handle:'fresh-'+id,incarnationId:'inc-'+id,agentIdentity:'codex',title:'Codex '+id,worktreeId:id,tabId:'tab',leafId:id,executionHostId:'local',connected:true,writable:true,orphaned:false}]}}));
 } else if (args[1] === 'switch') {
  fs.appendFileSync(${JSON.stringify(switchesPath)}, JSON.stringify(args)+'\\n');
  console.log(JSON.stringify({ok:true,_meta:data._meta,result:{focus:{navigated:true}}}));
+} else if(args[1] === 'create' || args[1] === 'send') {
+ fs.appendFileSync(${JSON.stringify(executionsPath)}, JSON.stringify(args)+'\\n');
+ const result=args[1]==='create'?{terminal:{handle:'new-shell',worktreeId:args[args.indexOf('--worktree')+1].slice(3)}}:{send:{handle:args[args.indexOf('--terminal')+1],accepted:true,prompt:{requestId:'test-request',stages:['input_accepted']}}};
+ console.log(JSON.stringify({ok:true,_meta:data._meta,result}));
 } else process.exit(1);
 `,
   );
@@ -187,17 +193,27 @@ else if (args[1] === 'list') {
         }),
       );
     },
-    appear(context, kind, controlId) {
+    appear(context, kind, controlId, extra = {}) {
       this.send("willAppear", context, kind, {
         controller: kind === "dial" ? "Encoder" : "Keypad",
         coordinates: { column: 0, row: 0 },
         isInMultiAction: false,
-        settings: { controlId },
+        settings: { controlId, ...extra },
         state: 0,
       });
     },
     setRows(ids, waitingIds = []) {
       writeFileSync(dataPath, JSON.stringify(snapshot(ids, waitingIds)));
+    },
+    executions() {
+      try {
+        return readFileSync(executionsPath, "utf8")
+          .trim()
+          .split("\n")
+          .map(JSON.parse);
+      } catch {
+        return [];
+      }
     },
     switches() {
       try {
@@ -442,4 +458,78 @@ test("押し込みでも最新状態を取得し、取得中の操作 ID 変更�
     "以前の ID への遅い回転を反映しない",
   );
   assert.deepEqual(f.switches(), []);
+});
+
+test("設定だけでは実行せず、回転直後のコマンドボタンで選択先に一度だけシェルを起動する", async (t) => {
+  const f = await fixture(t);
+  f.appear("key-main", "key", "main");
+  f.appear("dial-main", "dial", "main");
+  f.appear("run", "command", "main", {
+    mode: "shell",
+    body: "npm test",
+    label: "テスト",
+  });
+  await f.wait(imageContains("run", "A"));
+  assert.deepEqual(f.executions(), []);
+  f.setRows(["a", "c"]);
+  f.send("dialRotate", "dial-main", "dial", { ticks: 1, pressed: false });
+  f.send("keyDown", "run", "command");
+  f.send("keyDown", "run", "command");
+  await f.wait((m) => m.event === "showOk" && m.context === "run");
+  assert.deepEqual(f.executions(), [
+    [
+      "terminal",
+      "create",
+      "--worktree",
+      "id:c",
+      "--title",
+      "テスト",
+      "--command",
+      "npm test",
+      "--focus",
+      "--json",
+    ],
+  ]);
+  await f.wait(imageContains("run", "C"));
+});
+
+test("AI ボタンで指示を送り、古いプロセスを指定した設定では再送しない", async (t) => {
+  const f = await fixture(t);
+  f.appear("run", "command", "main", {
+    mode: "ai",
+    body: "変更をレビューして",
+  });
+  await f.wait(imageContains("run", "A"));
+  f.send("keyDown", "run", "command");
+  await f.wait((m) => m.event === "showOk" && m.context === "run");
+  assert.deepEqual(f.executions(), [
+    [
+      "terminal",
+      "send",
+      "--terminal",
+      "fresh-a",
+      "--text",
+      "変更をレビューして",
+      "--enter",
+      "--json",
+    ],
+  ]);
+  const start = f.history.length;
+  f.send("didReceiveSettings", "run", "command", {
+    settings: {
+      controlId: "main",
+      mode: "ai",
+      body: "変更をレビューして",
+      agentTargets: {
+        a: {
+          handle: "fresh-a",
+          runtimeId: "test-runtime",
+          incarnationId: "old",
+        },
+      },
+    },
+  });
+  f.send("keyDown", "run", "command");
+  await f.wait((m) => m.event === "showAlert" && m.context === "run", start);
+  assert.equal(f.executions().length, 1);
 });

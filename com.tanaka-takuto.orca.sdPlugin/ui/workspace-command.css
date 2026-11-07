@@ -1,0 +1,59 @@
+select,
+textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #50565e;
+  border-radius: 6px;
+  color: inherit;
+  background: #2b2f34;
+  font: inherit;
+}
+select {
+  min-height: 36px;
+}
+textarea {
+  line-height: 1.6;
+  resize: vertical;
+}
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #69b4ff;
+  outline-offset: 2px;
+}
+#command-form label {
+  margin-top: 16px;
+}
+#command-form label:first-child {
+  margin-top: 0;
+}
+#command-form .checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+.checkbox-row input {
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: #69b4ff;
+}
+.save-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+#last-result {
+  margin: 0;
+  color: #b8bec6;
+  line-height: 1.7;
+}
+#last-result[data-error="true"] {
+  color: #ffcb85;
+}
