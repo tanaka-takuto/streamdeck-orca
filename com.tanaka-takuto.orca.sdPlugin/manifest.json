@@ -1,7 +1,7 @@
 {
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "Name": "Orca",
-  "Version": "0.7.0.0",
+  "Version": "0.8.0.0",
   "Author": "tanaka-takuto",
   "Description": "Orca のワークスペース状態の表示・切り替え、シェルコマンドの実行、AIへの指示送信を行います。",
   "UUID": "com.tanaka-takuto.orca",
@@ -27,6 +27,28 @@
     }
   ],
   "Actions": [
+    {
+      "Name": "レビュー依頼からAI起動",
+      "UUID": "com.tanaka-takuto.orca.pr-review",
+      "Icon": "imgs/action-icon",
+      "Tooltip": "自分・所属チームへのレビュー依頼PRを選び、対象ワークスペースで新しいAIを起動します。入力テキスト・Enterは設定できます。",
+      "PropertyInspectorPath": "ui/pr-review.html",
+      "Controllers": ["Encoder"],
+      "Encoder": {
+        "layout": "ui/pr-review.json",
+        "TriggerDescription": {
+          "Rotate": "レビュー依頼されたPRを選ぶ",
+          "Push": "ワークスペースを用意してAIを起動・入力する",
+          "Touch": "GitHubのレビュー依頼を更新する"
+        }
+      },
+      "States": [
+        {
+          "Image": "imgs/key",
+          "ShowTitle": false
+        }
+      ]
+    },
     {
       "Name": "確認先を開く",
       "UUID": "com.tanaka-takuto.orca.attention",

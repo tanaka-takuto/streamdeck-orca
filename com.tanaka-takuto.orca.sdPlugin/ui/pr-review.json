@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/layout.json",
+  "id": "pr-review",
+  "items": [
+    {
+      "key": "status",
+      "type": "text",
+      "rect": [8, 0, 184, 14],
+      "font": { "size": 11, "weight": 600 },
+      "alignment": "left"
+    },
+    {
+      "key": "repo",
+      "type": "text",
+      "rect": [8, 14, 184, 16],
+      "font": { "size": 12 },
+      "alignment": "left"
+    },
+    {
+      "key": "pr",
+      "type": "text",
+      "rect": [8, 30, 184, 14],
+      "font": { "size": 11, "weight": 600 },
+      "alignment": "left"
+    },
+    {
+      "key": "title",
+      "type": "text",
+      "rect": [8, 44, 184, 15],
+      "font": { "size": 12 },
+      "alignment": "left"
+    },
+    {
+      "key": "title2",
+      "type": "text",
+      "rect": [8, 59, 184, 15],
+      "font": { "size": 12 },
+      "alignment": "left"
+    },
+    {
+      "key": "input",
+      "type": "text",
+      "rect": [8, 74, 184, 13],
+      "font": { "size": 10 },
+      "alignment": "left"
+    },
+    {
+      "key": "operation",
+      "type": "text",
+      "rect": [8, 87, 184, 13],
+      "font": { "size": 10 },
+      "alignment": "left"
+    }
+  ]
+}

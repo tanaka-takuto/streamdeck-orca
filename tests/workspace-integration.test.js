@@ -44,6 +44,36 @@ const info = {
   ],
 };
 
+test("初期化後に保存したPR起動記録を既存WSダイヤルの保存で消さない", async (t) => {
+  const f = await fixture(t);
+  f.appear("keep-record", "dial", "main");
+  await f.wait(
+    (m) =>
+      m.event === "setFeedback" &&
+      m.context === "keep-record" &&
+      m.payload.workspace === "A",
+  );
+  const record = {
+    status: "unknown",
+    operationId: "previous-operation",
+    accountId: 7,
+    pr: { repo: "acme/app", number: 12, sha: "a".repeat(40) },
+  };
+  f.setGlobalSettings({
+    ...f.settings,
+    prReviewLaunches: { previous: record },
+  });
+  const start = f.history.length;
+  f.send("dialRotate", "keep-record", "dial", { ticks: 1, pressed: false });
+  await f.wait(
+    (m) =>
+      m.event === "setGlobalSettings" &&
+      m.payload.workspaceSelections?.main?.workspaceId === "b",
+    start,
+  );
+  assert.deepEqual(f.settings.prReviewLaunches, { previous: record });
+});
+
 test("専用キーは表示済み AI に入力し、保存や選択変更だけでは入力しない", {
   skip: process.platform === "win32",
 }, async (t) => {
@@ -254,6 +284,9 @@ else if (args[1] === 'list') {
     history,
     get settings() {
       return settings;
+    },
+    setGlobalSettings(value) {
+      settings = value;
     },
     send(event, context, kind, payload = {}) {
       socket.send(

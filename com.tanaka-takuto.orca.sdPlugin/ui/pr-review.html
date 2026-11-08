@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>レビュー依頼からAI起動</title>
+    <link rel="stylesheet" href="workspace-status.css" />
+    <link rel="stylesheet" href="workspace-command.css" />
+    <link rel="stylesheet" href="pr-review.css" />
+    <script src="pr-review.js" defer></script>
+  </head>
+  <body><main>
+    <p class="eyebrow">ORCA / PR REVIEW</p>
+    <h1>レビュー依頼からAI起動</h1>
+    <p class="description">回してPRを選び、押すと対象ブランチのワークスペースで新しいAIを起動します。ワークスペースがなければ作成します。</p>
+    <form id="review-form">
+      <label for="review-mode">レビュー依頼の種類</label>
+      <select id="review-mode" disabled><option value="personal">自分への直接の依頼</option><option value="team">自分の所属チームへの依頼</option></select>
+      <label for="agent">起動するAI</label>
+      <select id="agent" disabled><option value="codex">Codex</option><option value="claude">Claude Code</option></select>
+      <label for="body">AIに渡すテキスト</label>
+      <textarea id="body" rows="7" maxlength="16000" disabled></textarea>
+      <p class="hint">PRのURLは {{pr_url}}、番号は {{pr_number}}、リポジトリは {{repo}}、対象ブランチは {{branch}}、コミットは {{head_sha}}、比較先は {{base_branch}} で挿入できます。</p>
+      <label class="checkbox-row"><input type="checkbox" id="enter" disabled />入力後にEnterを送る</label>
+      <p class="hint">オフの場合は下書きとして入力します。レビューの開始はOrcaでEnterを押したときです。</p>
+      <div class="save-row"><button type="submit" id="save" disabled>設定を保存</button></div>
+    </form>
+    <p id="message" role="status">接続しています…</p>
+    <section class="selection">
+      <p class="selection-label">ダイヤルに表示しているPR</p>
+      <p id="selected" style="white-space:pre-wrap;overflow-wrap:anywhere">取得中</p>
+      <p id="state" class="hint" style="white-space:pre-wrap;overflow-wrap:anywhere"></p>
+      <p id="receipt" style="white-space:pre-wrap;overflow-wrap:anywhere"></p>
+      <button type="button" id="refresh" disabled>レビュー依頼を更新</button>
+    </section>
+    <details class="selection">
+      <summary>同じPRでAIを起動し直す</summary>
+      <p class="hint">同じコミットで起動済みのPRは、押すとワークスペースを開きます。再度起動したい場合は、先にOrcaで前回のAIや入力状況を確認してください。</p>
+      <label class="checkbox-row"><input type="checkbox" id="confirmed" />このPRの前回の起動状況をOrcaで確認した</label>
+      <button type="button" id="forget" disabled>表示中PRの起動記録を解除</button>
+      <p class="hint">解除だけではAIは起動しません。次のダイヤル押下で新しいAIを起動します。</p>
+    </details>
+    <p class="note">回す：PRを選択 ／ 押す：AI起動・入力 ／ 画面をタップ：一覧更新。設定は保存後に反映され、保存だけではAIを起動しません。</p>
+    <p class="note">GitHub CLIへのログインが必要です。未登録のリポジトリは ~/orca/review-repositories/ に取得し、Orcaに追加します。作業中の変更や古いHEADがあるワークスペースは自動で書き換えません。</p>
+  </main></body>
+</html>

@@ -11,7 +11,7 @@ export type WorkspaceActivator = (
   isCurrent?: () => boolean,
 ) => Promise<boolean>;
 
-function readLocalMetadata(): unknown {
+export function readLocalMetadata(): unknown {
   let directory = process.env.ORCA_USER_DATA_PATH;
   if (!directory) {
     if (process.platform === "darwin")

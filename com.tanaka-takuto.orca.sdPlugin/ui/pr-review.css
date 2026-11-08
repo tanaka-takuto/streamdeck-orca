@@ -1,0 +1,27 @@
+#review-form label {
+  margin-top: 16px;
+}
+#review-form label:first-child {
+  margin-top: 0;
+}
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.6;
+  font-weight: 400;
+}
+.checkbox-row input {
+  margin-top: 5px;
+}
+details p,
+#receipt {
+  overflow-wrap: anywhere;
+}
+summary {
+  cursor: pointer;
+  line-height: 1.6;
+}
+#forget {
+  margin-top: 12px;
+}

@@ -11,6 +11,7 @@ import {
   WorkspaceExecutor,
 } from "./orca/execution";
 import { WorkspaceMonitor } from "./orca/monitor";
+import { updatePluginSettings } from "./plugin-settings";
 import { WorkspaceButtons, type WorkspaceKey } from "./workspace-buttons";
 import {
   ambiguousMessage,
@@ -107,15 +108,14 @@ class WorkspaceService {
     },
     (id, message) => this.report(id, message),
   );
-  private globalSettings: GlobalSettings = {};
+  private pendingSelections: Record<string, SavedSelection> = {};
   private settingsReady = false;
   private saveTimer?: ReturnType<typeof setTimeout>;
-  private saves: Promise<void> = Promise.resolve();
 
   async initialize(): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      this.globalSettings = await Promise.race([
+      const globalSettings = await Promise.race([
         streamDeck.settings.getGlobalSettings<GlobalSettings>(),
         new Promise<never>((_resolve, reject) => {
           timer = setTimeout(
@@ -125,7 +125,7 @@ class WorkspaceService {
         }),
       ]);
       this.settingsReady = true;
-      const saved = this.globalSettings.workspaceSelections;
+      const saved = globalSettings.workspaceSelections;
       this.selections.hydrate(
         saved && typeof saved === "object" && !Array.isArray(saved)
           ? saved
@@ -141,20 +141,15 @@ class WorkspaceService {
 
   private remember(id: string, selection: SavedSelection): void {
     if (!this.settingsReady) return;
-    this.globalSettings = {
-      ...this.globalSettings,
-      workspaceSelections: {
-        ...this.globalSettings.workspaceSelections,
-        [id]: selection,
-      },
-    };
+    this.pendingSelections[id] = selection;
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
-      const value = this.globalSettings;
-      this.saves = this.saves
-        .catch(() => {})
-        .then(() => streamDeck.settings.setGlobalSettings(value));
-      void this.saves.catch((error: unknown) => streamDeck.logger.warn(error));
+      const value = this.pendingSelections;
+      this.pendingSelections = {};
+      void updatePluginSettings((current) => ({
+        ...current,
+        workspaceSelections: { ...current.workspaceSelections, ...value },
+      })).catch((error: unknown) => streamDeck.logger.warn(error));
     }, 250);
     this.saveTimer.unref();
   }

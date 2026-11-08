@@ -14,6 +14,26 @@ git config --local core.hooksPath .githooks
 `core.hooksPath` はクローンごとの設定です。新しくクローンした場合も上記のコマンドを実行してください。
 設定は `git config --get core.hooksPath` で確認できます。
 
+## レビュー依頼されたPRからAIを起動する
+
+「Orca → レビュー依頼からAI起動」をダイヤルに配置します。操作IDやPRごとの割り当ては不要です。
+
+1. `gh auth login --hostname github.com` でGitHub CLIにログインし、OrcaのCLIを有効にします。`gh`・`git` がPATH上に必要です（macOSはHomebrewの標準配置も探します）。
+2. 設定画面で「自分への直接の依頼」または「自分の所属チームへの依頼」、起動するAI（Codex / Claude Code）、AIに渡すテキストを設定して保存します。
+3. ダイヤルを回してPRを選びます。LCDにリポジトリ、省略したタイトル、PR番号、識別補助タグ、入力のみ/Enterありを表示します。完全な情報は設定画面で確認できます。
+4. 押すと対象ブランチの既存ワークスペースを再利用し、なければPRのheadコミットから作成して、新しいAIを起動します。「入力後にEnterを送る」がオフなら下書きとして入力し、オンなら送信します。初期値はオフです。既存のAIへ追加入力する機能ではありません。
+5. LCDをタップすると一覧を更新します。表示中は約30秒ごとに自動更新し、最新更新順で最大100件を取得します。取得上限・一部結果は件数の `+` と設定画面に表示します。
+
+テキストには `{{pr_url}}`、`{{pr_number}}`、`{{repo}}`、`{{branch}}`、`{{head_sha}}`、`{{base_branch}}` を使えます。置換後1〜16000文字です。設定の編集や保存、候補の回転、一覧更新だけではAIを起動しません。
+
+個人宛ては `user-review-requested:@me`、チーム宛ては `team-review-requested-user:@me` で検索します。一般の `review-requested:@me` はチーム依頼も含むため使用しません。[GitHubの検索仕様](https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests#search-by-pull-request-review-status-and-reviewer)に従い、押下時にも認証アカウント・依頼・PRの状態を照合します。
+
+GitHub.comとローカルOrcaが対象です。対象リポジトリがOrcaに未登録なら `~/orca/review-repositories/<owner>/<repo>` に取得して登録します。同じリポジトリが複数登録されている場合は起動を止めます。通常のPRはheadブランチを使い、forkのPRは本体側の同名ブランチとの混同を避けて `streamdeck-review/pr-<番号>` を使います。既存WSのHEADがPRと違う場合や未コミット変更がある場合は、自動更新・上書きせず理由を設定画面に表示します。新規WSのセットアップスクリプトは実行しません。
+
+同じアカウント・PR・コミットの連打や複数ダイヤルからの操作で、AIを重複起動しません。起動済みの同じコミットを押すとWSを開き、再入力はしません。起動結果が不明の場合は自動再実行せず、元のPRと操作IDを記録します。Orcaで状況を確認したあと、設定画面の「同じPRでAIを起動し直す」から表示した一件の起動記録を解除できます。解除だけではAIは起動しません。
+
+入力・下書きの引き渡しは、レビュー処理の開始・完了やGitHubへのレビュー投稿を意味しません。GitHubへのレビュー投稿はこのアクションから行いません。Enterなしの起動にはCLIに未公開のOrca認証済みローカル `agent.launchReplay` APIのdraft指定を使い、対応capabilityのないOrcaでは起動を拒否します。Windows・実機でのPRレビュー起動は未検証です。
+
 ## 入力待ち・返答の確認先を一押しで開く
 
 「Orca → 確認先を開く」をキーに一つ配置してください。操作IDや個別ワークスペースの設定は不要です。OrcaのCLIと状態通知フックは有効にしてください。
