@@ -77,12 +77,21 @@ function fixture({
       if (route.startsWith("/commits/v")) return { sha: tagSha };
       if (route.startsWith("/git/ref/tags/"))
         return release ? { object: { sha: tagSha } } : undefined;
-      if (route.startsWith("/releases/tags/")) return release;
+      if (route.startsWith("/releases/tags/"))
+        return release?.draft ? undefined : release;
+      if (route === "/releases?per_page=100") return [release ? [release] : []];
+      if (route === "/releases/1") return release;
       throw new Error(`Unexpected route ${route}`);
     }
     mutations.push(args[1]);
     if (args[1] === "create")
-      release = { id: 1, draft: true, target_commitish: sha, assets: [] };
+      release = {
+        id: 1,
+        tag_name: "v0.8.0.12",
+        draft: true,
+        target_commitish: sha,
+        assets: [],
+      };
     if (args[1] === "upload") {
       if (failUpload) throw new Error("upload failed");
       release.assets = [
@@ -220,11 +229,13 @@ if(a[0]==='api') {
   const route=a[1].replace('repos/${input.repository}','');
   if(!route) console.log(JSON.stringify({default_branch:'main'}));
   else if(route==='/commits/main') console.log(JSON.stringify({sha:'${sha}'}));
-  else if(route.startsWith('/releases/tags/')&&state) console.log(JSON.stringify(state));
+  else if(route.startsWith('/releases/tags/')&&state&&!state.draft) console.log(JSON.stringify(state));
+  else if(route==='/releases?per_page=100') console.log(JSON.stringify(state?[[state]]:[[]]));
+  else if(route==='/releases/1'&&state) console.log(JSON.stringify(state));
   else {console.log(JSON.stringify({message:'Not Found',status:'404'}));process.exit(1);}
 } else {
   fs.appendFileSync('effects.log',a[1]+'\\n');
-  if(a[1]==='create') fs.writeFileSync('state.json',JSON.stringify({draft:true,target_commitish:'${sha}',assets:[]}));
+  if(a[1]==='create') fs.writeFileSync('state.json',JSON.stringify({id:1,tag_name:'v0.8.0.12',draft:true,target_commitish:'${sha}',assets:[]}));
   if(a[1]==='upload') {state.assets=['${meta.asset}','SHA256SUMS'].map(name=>({name,state:'uploaded',size:10}));fs.writeFileSync('state.json',JSON.stringify(state));}
   if(a[1]==='edit') {state.draft=false;fs.writeFileSync('state.json',JSON.stringify(state));}
 }

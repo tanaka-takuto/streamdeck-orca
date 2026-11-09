@@ -39,6 +39,7 @@ function runGh(args, optional = false) {
     const output = execFileSync("gh", args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      maxBuffer: 20 * 1024 * 1024,
     });
     return args[0] === "api" ? JSON.parse(output) : undefined;
   } catch (error) {
@@ -74,7 +75,24 @@ export function publishRelease(meta, { gh = runGh, directory = "dist" } = {}) {
   const ref = get(`/git/ref/tags/${meta.tag}`, true);
   if (ref && get(`/commits/${meta.tag}`).sha !== meta.sha)
     throw new Error("Release tag SHA differs from build SHA");
-  const existing = get(`/releases/tags/${meta.tag}`, true);
+  // The tag endpoint only returns published releases. Lists also include drafts.
+  const findRelease = () => {
+    const pages = gh([
+      "api",
+      `repos/${meta.repository}/releases?per_page=100`,
+      "--paginate",
+      "--slurp",
+    ]);
+    if (!Array.isArray(pages) || !pages.every(Array.isArray))
+      throw new Error("Release list is unavailable");
+    const matches = pages
+      .flat()
+      .filter((release) => release.tag_name === meta.tag);
+    if (matches.length > 1)
+      throw new Error("Multiple releases have the same tag");
+    return matches[0];
+  };
+  const existing = findRelease();
   const complete = (release) =>
     [meta.asset, "SHA256SUMS"].every((name) =>
       release.assets?.some(
@@ -107,6 +125,15 @@ export function publishRelease(meta, { gh = runGh, directory = "dist" } = {}) {
       "--notes-file",
       join(directory, "release-notes.md"),
     ]);
+  const draft = existing ?? findRelease();
+  if (
+    !Number.isSafeInteger(draft?.id) ||
+    draft.id <= 0 ||
+    draft.draft !== true ||
+    draft.tag_name !== meta.tag ||
+    draft.target_commitish !== meta.sha
+  )
+    throw new Error("Created draft identity differs from build SHA or tag");
   gh([
     "release",
     "upload",
@@ -115,7 +142,14 @@ export function publishRelease(meta, { gh = runGh, directory = "dist" } = {}) {
     join(directory, "SHA256SUMS"),
     "--clobber",
   ]);
-  if (!complete(get(`/releases/tags/${meta.tag}`)))
+  const uploaded = get(`/releases/${draft.id}`);
+  if (
+    uploaded.id !== draft.id ||
+    uploaded.draft !== true ||
+    uploaded.tag_name !== meta.tag ||
+    uploaded.target_commitish !== meta.sha ||
+    !complete(uploaded)
+  )
     throw new Error("Release assets are incomplete; left as draft");
   gh(["release", "edit", ...common, "--draft=false", `--latest=${promote}`]);
   return `published ${meta.tag}`;
