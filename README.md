@@ -2,6 +2,24 @@
 
 Stream Deck + から Orca を操作するプラグイン。
 
+## ダウンロードとインストール
+
+[最新版のインストーラーをダウンロード](https://github.com/tanaka-takuto/streamdeck-orca/releases/latest/download/com.tanaka-takuto.orca.streamDeckPlugin)
+
+ダウンロードした `.streamDeckPlugin` をダブルクリックしてインストールします。Stream Deckアプリ6.9以上が必要です。過去の版とSHA-256は [GitHub Releases](https://github.com/tanaka-takuto/streamdeck-orca/releases) から取得できます。初回の自動リリースが成功すると、上記の最新版リンクが使えるようになります。
+
+## 自動ビルドとリリース
+
+デフォルトブランチ（現在は `main`）へのpushで [Build and release](.github/workflows/release.yml) が動きます。他ブランチやタグのpushではジョブを実行しません。Actions画面からデフォルトブランチを指定して手動実行することもできます。
+
+Node.js 20 / 22で全テストを実行し、型チェック・Lint・build・validate・packがすべて成功した成果物だけをGitHub Releasesへ公開します。pack後にもLint、最終ソースと生成bundle、パッケージ内の全ファイルの一致を確認します。ビルドにはmacOSランナーを使い、Stream Deckアプリ本体のインストールや実Orcaへの接続は必要ありません。
+
+リリース版は `package.json` のバージョンにActionsの実行番号を加えた形式です（例: `0.8.0.12`、タグ `v0.8.0.12`）。インストーラーの内部バージョンも同じにします。この変更はCI内だけで行い、ソースへバージョン変更を自動コミットしません。ベースの版を変更するときは `package.json` とmanifestの先頭3要素を揃えてください。
+
+公開するファイルはインストーラーと `SHA256SUMS` です。全ファイルのアップロードを確認するまではdraftのままにし、失敗後の再実行ではそのdraftを回復します。すでに公開済みの同じ版は上書きしません。古い実行の再試行で最新版を巻き戻さず、デフォルトブランチが先へ進んでいる場合はその古い実行の公開をスキップします。ビルド成果物はActionsにも14日間保存します。
+
+リリース用の書き込み権限は公開ジョブの `GITHUB_TOKEN` にだけ付与します。追加のPATやSecrets設定は不要です。GitHub側のワークフロー実行と実Release公開は、push後のActionsで確認してください。
+
 ## 開発環境のセットアップ
 
 Node.js 22.12.0 以上と npm、Git が必要です。リポジトリのルートで実行してください。
