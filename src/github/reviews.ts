@@ -1,6 +1,7 @@
 import { executable, runCommand } from "../command";
 import { object } from "../orca/model";
 
+export type ReviewOrder = "asc" | "desc";
 export type ReviewMode = "personal" | "team";
 export type ReviewPR = {
   repo: string;
@@ -8,12 +9,15 @@ export type ReviewPR = {
   title: string;
   url: string;
   author: string;
+  updatedAt?: string;
 };
 export type ReviewList = {
   account: string;
   accountId: number;
   rows: ReviewPR[];
   partial: boolean;
+  totalCount: number;
+  incomplete: boolean;
 };
 export type ReviewDetail = ReviewPR & {
   sha: string;
@@ -43,7 +47,11 @@ export class GitHubReviews {
       );
     return { login: user.login, id: user.id as number };
   }
-  async list(mode: ReviewMode, repo?: string): Promise<ReviewList> {
+  async list(
+    mode: ReviewMode,
+    repo?: string,
+    order: ReviewOrder = "desc",
+  ): Promise<ReviewList> {
     const account = await this.account();
     const data = object(
       await this.run([
@@ -58,14 +66,15 @@ export class GitHubReviews {
         "-f",
         "sort=updated",
         "-f",
-        "order=desc",
+        `order=${order}`,
         "-F",
         "per_page=100",
       ]),
     );
     if (
       !Array.isArray(data.items) ||
-      typeof data.total_count !== "number" ||
+      !Number.isSafeInteger(data.total_count) ||
+      (data.total_count as number) < data.items.length ||
       typeof data.incomplete_results !== "boolean"
     )
       throw new Error("レビュー依頼の一覧を確認できません。");
@@ -84,7 +93,15 @@ export class GitHubReviews {
         typeof row.title !== "string"
       )
         throw new Error("PRの識別情報を確認できません。");
+      const updatedAt =
+        typeof row.updated_at === "string" &&
+        Number.isFinite(Date.parse(row.updated_at))
+          ? row.updated_at
+          : undefined;
+      if (order === "asc" && !updatedAt)
+        throw new Error("PRの更新日時を確認できません。");
       return {
+        ...(updatedAt ? { updatedAt } : {}),
         repo: match[1],
         number: row.number as number,
         title: row.title,
@@ -92,6 +109,12 @@ export class GitHubReviews {
         author: String(object(row.user).login ?? ""),
       };
     });
+    if (order === "asc")
+      rows.sort(
+        (a, b) =>
+          Date.parse(a.updatedAt ?? "") - Date.parse(b.updatedAt ?? "") ||
+          prKey(a).localeCompare(prKey(b)),
+      );
     const after = await this.account();
     if (after.id !== account.id || after.login !== account.login)
       throw new Error("GitHubのアカウントが変わりました。更新してください。");
@@ -99,15 +122,19 @@ export class GitHubReviews {
       account: account.login,
       accountId: account.id,
       rows,
-      partial: data.incomplete_results || data.total_count > rows.length,
+      totalCount: data.total_count as number,
+      incomplete: data.incomplete_results as boolean,
+      partial:
+        data.incomplete_results || (data.total_count as number) > rows.length,
     };
   }
   async detail(
     pr: ReviewPR,
     mode: ReviewMode,
     accountId: number,
+    order: ReviewOrder = "desc",
   ): Promise<ReviewDetail> {
-    const list = await this.list(mode, pr.repo);
+    const list = await this.list(mode, pr.repo, order);
     if (list.accountId !== accountId)
       throw new Error("GitHubのアカウントが変わりました。更新してください。");
     if (!list.rows.some((p) => prKey(p) === prKey(pr)))

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 
-test("アクション一覧からWS選択・コマンド・レーダーを除き、残る4アクションを維持する", () => {
+test("アクション一覧からWS選択・コマンド・レーダーを除き、既存4アクションと最古PRボタンを維持する", () => {
   const manifest = JSON.parse(
     readFileSync("com.tanaka-takuto.orca.sdPlugin/manifest.json", "utf8"),
   );
@@ -12,7 +12,13 @@ test("アクション一覧からWS選択・コマンド・レーダーを除き
     assert.equal(actions.includes(`com.tanaka-takuto.orca.${removed}`), false);
   assert.deepEqual(
     actions.sort(),
-    ["workspace-status", "active-ai-input", "attention", "pr-review"]
+    [
+      "workspace-status",
+      "active-ai-input",
+      "attention",
+      "pr-review",
+      "oldest-pr-review",
+    ]
       .map((name) => `com.tanaka-takuto.orca.${name}`)
       .sort(),
   );

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>最古のレビュー依頼</title><link rel="stylesheet" href="workspace-status.css"/><link rel="stylesheet" href="action-form.css"/><script src="oldest-pr-review.js" defer></script></head>
+<body><main>
+<p class="eyebrow">ORCA / OLDEST REVIEW</p>
+<h1>最古のレビュー依頼</h1>
+<p class="description">自分に直接届いたレビュー依頼を、更新日時が古い順に扱います。ボタンに件数と次のPRを表示し、押すと対象ブランチのWSでAIを起動します。</p>
+<form id="review-form">
+<label for="agent">起動するAI</label><select id="agent" disabled><option value="codex">Codex</option><option value="claude">Claude Code</option></select>
+<label for="handoff">AIへの渡し方</label><select id="handoff" disabled><option value="none">AIを起動するだけ</option><option value="draft">本文を下書きとして入力する</option><option value="send">本文を入力して送信する</option></select>
+<label for="body">AIに渡す本文</label><textarea id="body" rows="7" maxlength="16000" disabled></textarea>
+<p id="handoff-help" class="hint"></p>
+<p class="hint">{{PR_LINK}} は対象PRのリンクに置き換わります。{{pr_number}}、{{repo}}、{{branch}}、{{head_sha}}、{{base_branch}} も使えます。</p>
+<div class="save-row"><button id="save" type="submit" disabled>設定を保存</button></div>
+</form>
+<p id="message" role="status" aria-live="polite">接続しています…</p>
+<section class="selection" aria-label="次に開くPR"><p class="selection-label">ボタンに表示中の最古PR</p><p id="selected" class="identity">取得中</p><p id="state" class="identity"></p><button id="refresh" type="button" disabled>レビュー依頼を更新</button></section>
+<section class="selection"><p class="selection-label">直近の起動・移動</p><p id="receipt" class="identity"></p></section>
+<details class="selection"><summary>同じPRでAIを起動し直す</summary><p class="hint">再クリックは同じPRのWSを開くだけです。新しいAIが必要なときは、Orcaで前回の状態を確認してから表示中の記録を解除してください。</p><label class="checkbox-row"><input id="confirmed" type="checkbox"/>前回の起動状況をOrcaで確認した</label><button id="forget" type="button" disabled>表示中PRの起動記録を解除</button><p class="hint">解除だけでは起動しません。過去の記録が複数ある場合は、残る記録も確認して解除してください。</p></details>
+<p class="note">件数はGitHubのOpenなレビュー待ちPR数です。AI起動やWS移動では減りません。レビュー依頼が残る限り、同じ最古PRが対象です。</p>
+<p class="note">約30秒ごとと押下時に更新します。対象が変わった押下では新しいPRを起動しません。GitHub CLIへのログインが必要です。WSがなければ作成し、対象ブランチ・HEADが一致しない既存WSは自動で書き換えません。</p>
+</main></body></html>

@@ -217,3 +217,80 @@ test("起動済みWSを別ブランチに切り替えた場合はそのPRとし�
   );
   assert.ok(!f.calls.some((a) => a[0] === "focus"));
 });
+test("PR_LINKエイリアスを空白付きでも一度だけ展開する", () => {
+  assert.equal(
+    reviewPrompt("Review {{ PR_LINK }}\n{{pr_url}}", pr),
+    `Review ${pr.url}\n${pr.url}`,
+  );
+});
+test("起動だけでは空本文を許容してpromptを一切渡さず、再押下で重複起動しない", async () => {
+  const f = fixture();
+  f.deps.rpc = async (method, params) => {
+    f.calls.push([method, params]);
+    return env({
+      worktreeId: "repo::/ws",
+      outcome: { kind: "structured", handle: "chat" },
+    });
+  };
+  const result = await f.launcher.launch(pr, 7, { handoff: "none", body: "" });
+  assert.equal(result.status, "accepted");
+  const params = f.calls.find((a) => a[0] === "agent.launchReplay")[1];
+  assert.equal("prompt" in params, false);
+  assert.equal(
+    (await f.launcher.launch(pr, 7, { handoff: "none", body: "" })).status,
+    "opened",
+  );
+  assert.equal(f.calls.filter((a) => a[0] === "agent.launchReplay").length, 1);
+});
+test("現行statusのruntime.capabilitiesでも起動対応を確認する", async () => {
+  const f = fixture(),
+    run = f.deps.run;
+  f.deps.run = async (a) => {
+    const value = await run(a);
+    if (a[0] === "status")
+      return env({ runtime: { capabilities: value.result.capabilities } });
+    return value;
+  };
+  assert.equal(
+    (await f.launcher.launch(pr, 7, { body: "review" })).status,
+    "accepted",
+  );
+});
+test("最古ボタンの検証検索にも昇順を渡し、再利用focusへ取消ガードを渡す", async () => {
+  const f = fixture(),
+    orders = [];
+  f.deps.github.detail = async (_pr, _mode, _account, order) => {
+    orders.push(order);
+    return f.detail;
+  };
+  await f.launcher.launch(pr, 7, { body: "review" }, () => true, "asc");
+  assert.deepEqual(orders, ["asc", "asc"]);
+  let guard,
+    current = true;
+  f.deps.focus = async (_id, check) => {
+    guard = check;
+    return true;
+  };
+  await f.launcher.launch(pr, 7, { body: "review" }, () => current, "asc");
+  assert.equal(typeof guard, "function");
+  current = false;
+  assert.equal(guard(), false);
+});
+test("最古ボタンは同じPRのSHAが変わりWSを更新済みでもAIを重複起動しない", async () => {
+  const f = fixture();
+  await f.launcher.launch(pr, 7, { body: "review" }, () => true, "asc");
+  const next = { ...pr, sha: "b".repeat(40) };
+  f.deps.github.detail = async () => next;
+  const git = f.deps.git;
+  f.launcher.git = async (path, args) =>
+    args[0] === "rev-parse" ? next.sha : git(path, args);
+  const r = await f.launcher.launch(
+    pr,
+    7,
+    { body: "review" },
+    () => true,
+    "asc",
+  );
+  assert.equal(r.status, "opened");
+  assert.equal(f.calls.filter((a) => a[0] === "agent.launchReplay").length, 1);
+});

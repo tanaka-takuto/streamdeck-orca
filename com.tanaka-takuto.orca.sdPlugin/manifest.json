@@ -90,6 +90,20 @@
           "ShowTitle": false
         }
       ]
+    },
+    {
+      "Name": "最古のレビュー依頼",
+      "UUID": "com.tanaka-takuto.orca.oldest-pr-review",
+      "Icon": "imgs/action-icon",
+      "Tooltip": "自分宛てレビュー待ちPRの件数を表示。押すと更新日時が最古のPRのWSでAIを起動し、再押下はWSを開きます。",
+      "PropertyInspectorPath": "ui/oldest-pr-review.html",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "imgs/key",
+          "ShowTitle": false
+        }
+      ]
     }
   ]
 }

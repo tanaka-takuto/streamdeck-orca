@@ -55,3 +55,37 @@ test("検索上限や不完全な検索を全件取得として扱わない", as
   );
   assert.equal((await g.list("team")).partial, true);
 });
+test("最古検索はGitHubでupdated昇順を指定し全件数と不完全検索を分ける", async () => {
+  const calls = [];
+  const g = new GitHubReviews(async (a) => {
+    calls.push(a);
+    return a[1] === "user"
+      ? { login: "me", id: 7 }
+      : {
+          total_count: 120,
+          incomplete_results: false,
+          items: [{ ...item, updated_at: "2026-01-02T00:00:00Z" }],
+        };
+  });
+  const list = await g.list("personal", undefined, "asc");
+  assert.ok(calls.find((a) => a[1] === "search/issues").includes("order=asc"));
+  assert.equal(list.totalCount, 120);
+  assert.equal(list.incomplete, false);
+  assert.equal(list.rows[0].updatedAt, "2026-01-02T00:00:00Z");
+});
+test("最古検索で更新日時がない候補と不正な全件数を採用しない", async () => {
+  for (const patch of [
+    { items: [item] },
+    {
+      total_count: -1,
+      items: [{ ...item, updated_at: "2026-01-01T00:00:00Z" }],
+    },
+  ]) {
+    const g = new GitHubReviews(async (a) =>
+      a[1] === "user"
+        ? { login: "me", id: 7 }
+        : { total_count: 1, incomplete_results: false, ...patch },
+    );
+    await assert.rejects(g.list("personal", undefined, "asc"));
+  }
+});

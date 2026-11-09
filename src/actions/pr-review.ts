@@ -9,53 +9,16 @@ import streamDeck, {
   type WillAppearEvent,
   type WillDisappearEvent,
 } from "@elgato/streamdeck";
-import { runCommand } from "../command";
-import { GitHubReviews, prKey } from "../github/reviews";
-import { OrcaClient, resolveOrcaCommand } from "../orca/client";
-import { createLocalRpc } from "../orca/local-rpc";
-import { ReviewLauncher, type ReviewRecord } from "../orca/review-launcher";
-import { readPluginSettings, updatePluginSettings } from "../plugin-settings";
+import { prKey } from "../github/reviews";
+import type { ReviewRecord } from "../orca/review-launcher";
 import { PRReviewController } from "../pr-review-controller";
+import {
+  reviewGitHub as github,
+  reviewLauncher as launcher,
+  readReviewRecords as records,
+} from "../pr-review-runtime";
 import type { ReviewSettings } from "../pr-review-settings";
 
-async function records() {
-  return (await readPluginSettings()).prReviewLaunches ?? {};
-}
-async function saveRecord(
-  key: string,
-  value: ReviewRecord | undefined,
-): Promise<void> {
-  const saved = (
-    await updatePluginSettings((current) => {
-      const next = { ...current.prReviewLaunches };
-      if (value) next[key] = { ...value };
-      else delete next[key];
-      return { ...current, prReviewLaunches: next };
-    })
-  ).prReviewLaunches?.[key];
-  if (
-    value
-      ? saved?.operationId !== value.operationId ||
-        saved?.status !== value.status
-      : saved !== undefined
-  )
-    throw new Error(
-      "起動記録の保存を確認できません。Orca側を確認してください。",
-    );
-}
-const command = resolveOrcaCommand();
-const run = async (args: string[]) =>
-  JSON.parse(await runCommand(command, args));
-const github = new GitHubReviews();
-const client = new OrcaClient(run);
-const launcher = new ReviewLauncher({
-  github,
-  run,
-  rpc: createLocalRpc(),
-  readRecords: records,
-  saveRecord,
-  focus: (id) => client.focusWorkspace(id),
-});
 const controller = new PRReviewController(github, launcher);
 
 @action({ UUID: "com.tanaka-takuto.orca.pr-review" })

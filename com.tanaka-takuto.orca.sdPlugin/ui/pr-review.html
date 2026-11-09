@@ -20,7 +20,7 @@
       <select id="agent" disabled><option value="codex">Codex</option><option value="claude">Claude Code</option></select>
       <label for="body">AIに渡すテキスト</label>
       <textarea id="body" rows="7" maxlength="16000" disabled></textarea>
-      <p class="hint">PRのURLは {{pr_url}}、番号は {{pr_number}}、リポジトリは {{repo}}、対象ブランチは {{branch}}、コミットは {{head_sha}}、比較先は {{base_branch}} で挿入できます。</p>
+      <p class="hint">PRのURLは {{PR_LINK}}（{{pr_url}} も使用可）、番号は {{pr_number}}、リポジトリは {{repo}}、対象ブランチは {{branch}}、コミットは {{head_sha}}、比較先は {{base_branch}} で挿入できます。</p>
       <label class="checkbox-row"><input type="checkbox" id="enter" disabled />入力後にEnterを送る</label>
       <p class="hint">オフの場合は下書きとして入力します。レビューの開始はOrcaでEnterを押したときです。</p>
       <div class="save-row"><button type="submit" id="save" disabled>設定を保存</button></div>

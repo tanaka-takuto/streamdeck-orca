@@ -4,6 +4,7 @@ export type ReviewSettings = {
   agent?: "codex" | "claude";
   body?: string;
   enter?: boolean;
+  handoff?: "none" | "draft" | "send";
   revision?: string;
 };
 export const defaultReviewBody =
@@ -19,6 +20,7 @@ export function normalizeReviewSettings(s: ReviewSettings) {
 }
 export function reviewPrompt(body: string, pr: ReviewDetail): string {
   const values: Record<string, string> = {
+    PR_LINK: pr.url,
     pr_url: pr.url,
     pr_number: String(pr.number),
     repo: pr.repo,
@@ -29,7 +31,7 @@ export function reviewPrompt(body: string, pr: ReviewDetail): string {
   const text = body
     .replaceAll("\r\n", "\n")
     .replace(
-      /\{\{(pr_url|pr_number|repo|branch|head_sha|base_branch)\}\}/gu,
+      /\{\{\s*(PR_LINK|pr_url|pr_number|repo|branch|head_sha|base_branch)\s*\}\}/gu,
       (_, name: string) => values[name],
     );
   if (
@@ -44,4 +46,26 @@ export function reviewPrompt(body: string, pr: ReviewDetail): string {
       "AIに渡すテキストを1〜16000文字で設定してください。制御文字は使えません。",
     );
   return text;
+}
+
+export function reviewHandoff(s: ReviewSettings): "none" | "draft" | "send" {
+  return s.handoff === "none" || s.handoff === "draft" || s.handoff === "send"
+    ? s.handoff
+    : s.enter === true
+      ? "send"
+      : "draft";
+}
+export function normalizeOldestReviewSettings(s: ReviewSettings) {
+  const handoff: "none" | "draft" | "send" =
+    s.handoff === "draft" || s.handoff === "send" ? s.handoff : "none";
+  return {
+    ...normalizeReviewSettings(s),
+    reviewMode: "personal" as const,
+    handoff,
+    enter: handoff === "send",
+    body:
+      typeof s.body === "string"
+        ? s.body
+        : defaultReviewBody.replace("{{pr_url}}", "{{PR_LINK}}"),
+  };
 }

@@ -7,11 +7,13 @@ import {
   type GitHubReviews,
   prKey,
   type ReviewDetail,
+  type ReviewOrder,
   type ReviewPR,
 } from "../github/reviews";
 import {
   normalizeReviewSettings,
   type ReviewSettings,
+  reviewHandoff,
   reviewPrompt,
 } from "../pr-review-settings";
 import type { CliRunner } from "./client";
@@ -40,7 +42,7 @@ type Dependencies = {
   git?: (path: string, args: string[]) => Promise<string>;
   readRecords: () => Promise<Record<string, ReviewRecord>>;
   saveRecord: (key: string, value: ReviewRecord | undefined) => Promise<void>;
-  focus: (id: string) => Promise<boolean>;
+  focus: (id: string, isCurrent: () => boolean) => Promise<boolean>;
   cloneRoot?: string;
 };
 export const launchKey = (account: number, pr: ReviewDetail) =>
@@ -139,6 +141,7 @@ export class ReviewLauncher {
     accountId: number,
     raw: ReviewSettings,
     isCurrent = () => true,
+    order: ReviewOrder = "desc",
   ): Promise<ReviewLaunchResult> {
     const lock = `${accountId}:${prKey(pr)}`;
     if (this.busy.has(lock))
@@ -151,15 +154,35 @@ export class ReviewLauncher {
       record: ReviewRecord | undefined,
       uncertain = false;
     try {
-      const settings = normalizeReviewSettings(raw);
+      const handoff = reviewHandoff(raw);
+      const settings = {
+        ...normalizeReviewSettings(raw),
+        enter: handoff === "send",
+      };
       const detail = await this.deps.github.detail(
         pr,
         settings.reviewMode,
         accountId,
+        order,
       );
-      const text = reviewPrompt(settings.body, detail);
+      const text =
+        handoff === "none" ? undefined : reviewPrompt(settings.body, detail);
       key = launchKey(accountId, detail);
-      const previous = (await this.deps.readRecords())[key];
+      const records = await this.deps.readRecords();
+      const previous =
+        order === "asc"
+          ? Object.values(records)
+              .filter(
+                (r) =>
+                  r && r.accountId === accountId && prKey(r.pr) === prKey(pr),
+              )
+              .sort(
+                (a, b) =>
+                  b.at - a.at ||
+                  Number(a.status === "accepted") -
+                    Number(b.status === "accepted"),
+              )[0]
+          : records[key];
       if (!isCurrent())
         return {
           status: "cancelled",
@@ -205,7 +228,7 @@ export class ReviewLauncher {
               status: "cancelled",
               message: "選択や設定が変わったため開いていません。",
             };
-          if (!(await this.deps.focus(previous.workspaceId)))
+          if (!(await this.deps.focus(previous.workspaceId, isCurrent)))
             throw new Error(
               "起動済みのワークスペースを開けません。Orcaで確認してください。",
             );
@@ -225,12 +248,16 @@ export class ReviewLauncher {
       }
       const status = this.response(await this.deps.run(["status", "--json"]));
       const runtimeId = status.runtimeId;
-      const capabilities = status.result.capabilities;
+      const capabilities =
+        status.result.capabilities ??
+        (status.result.runtime
+          ? object(status.result.runtime).capabilities
+          : undefined);
       if (
         !Array.isArray(capabilities) ||
         ![
           "agent.launch.v2",
-          "agent.launch.prompt-carry.v1",
+          ...(text === undefined ? [] : ["agent.launch.prompt-carry.v1"]),
           "agent.launch.replay-required.v1",
         ].every((c) => capabilities.includes(c))
       )
@@ -380,6 +407,7 @@ export class ReviewLauncher {
         pr,
         settings.reviewMode,
         accountId,
+        order,
       );
       if (
         fresh.sha !== detail.sha ||
@@ -409,7 +437,14 @@ export class ReviewLauncher {
             operationId: record.operationId,
             agent: settings.agent,
             target: { kind: "existing", worktree: `id:${ws.id}` },
-            prompt: { text, delivery: settings.enter ? "submit" : "draft" },
+            ...(text === undefined
+              ? {}
+              : {
+                  prompt: {
+                    text,
+                    delivery: settings.enter ? "submit" : "draft",
+                  },
+                }),
             launchSource: "cli",
             presentation: "focused",
           },
@@ -418,21 +453,27 @@ export class ReviewLauncher {
         runtimeId,
       ).result;
       const outcome = object(launched.outcome),
-        prompt = object(launched.prompt);
+        prompt = text === undefined ? undefined : object(launched.prompt);
       if (
         launched.worktreeId !== ws.id ||
         !["terminal", "structured"].includes(String(outcome.kind)) ||
         typeof outcome.handle !== "string" ||
         !outcome.handle ||
-        prompt.delivery !== (settings.enter ? "submit" : "draft") ||
-        !["handed-to-terminal", "journaled"].includes(String(prompt.outcome))
+        (text !== undefined &&
+          (prompt?.delivery !== (settings.enter ? "submit" : "draft") ||
+            !["handed-to-terminal", "journaled"].includes(
+              String(prompt?.outcome),
+            )))
       )
         throw new Error("AIへの入力結果を確認できません。");
       record.status = "accepted";
       record.handle = outcome.handle;
-      record.message = settings.enter
-        ? "AI起動と入力・Enterの引き渡しを確認しました。処理結果はOrcaで確認してください。"
-        : "AI起動と下書きの引き渡しを確認しました。Enterは送っていません。";
+      record.message =
+        text === undefined
+          ? "AI起動を確認しました。本文は渡していません。"
+          : settings.enter
+            ? "AI起動と入力・Enterの引き渡しを確認しました。処理結果はOrcaで確認してください。"
+            : "AI起動と下書きの引き渡しを確認しました。Enterは送っていません。";
       await this.deps.saveRecord(key, record);
       return { status: "accepted", message: record.message, record };
     } catch (error) {
