@@ -20,7 +20,6 @@ const device = "test-deck";
 const actions = {
   radar: "com.tanaka-takuto.orca.change-radar",
   key: "com.tanaka-takuto.orca.workspace-status",
-  dial: "com.tanaka-takuto.orca.workspace-dial",
   command: "com.tanaka-takuto.orca.workspace-command",
   active: "com.tanaka-takuto.orca.active-ai-input",
   attention: "com.tanaka-takuto.orca.attention",
@@ -44,34 +43,37 @@ const info = {
   ],
 };
 
-test("初期化後に保存したPR起動記録を既存WSダイヤルの保存で消さない", async (t) => {
-  const f = await fixture(t);
-  f.appear("keep-record", "dial", "main");
-  await f.wait(
-    (m) =>
-      m.event === "setFeedback" &&
-      m.context === "keep-record" &&
-      m.payload.workspace === "A",
-  );
+test("初期化後に追加したPR起動記録を後発のWS選択保存で消さない", async (t) => {
   const record = {
     status: "unknown",
     operationId: "previous-operation",
     accountId: 7,
     pr: { repo: "acme/app", number: 12, sha: "a".repeat(40) },
   };
+  const f = await fixture(t);
+  f.appear("bootstrap", "command", "main", { mode: "shell", body: "npm test" });
+  await f.wait(
+    (m) =>
+      m.event === "setGlobalSettings" &&
+      m.payload.workspaceSelections?.main?.workspaceId === "a",
+  );
   f.setGlobalSettings({
     ...f.settings,
     prReviewLaunches: { previous: record },
   });
   const start = f.history.length;
-  f.send("dialRotate", "keep-record", "dial", { ticks: 1, pressed: false });
+  f.appear("keep-record", "command", "later", {
+    mode: "shell",
+    body: "npm test",
+  });
   await f.wait(
     (m) =>
       m.event === "setGlobalSettings" &&
-      m.payload.workspaceSelections?.main?.workspaceId === "b",
+      m.payload.workspaceSelections?.later?.workspaceId === "a",
     start,
   );
   assert.deepEqual(f.settings.prReviewLaunches, { previous: record });
+  assert.deepEqual(f.executions(), []);
 });
 
 test("専用キーは表示済み AI に入力し、保存や選択変更だけでは入力しない", {
@@ -326,7 +328,7 @@ else if (args[1] === 'list') {
     appear(context, kind, controlId, extra = {}) {
       actionSettings.set(context, { controlId, ...extra });
       this.send("willAppear", context, kind, {
-        controller: ["dial", "radar"].includes(kind) ? "Encoder" : "Keypad",
+        controller: kind === "radar" ? "Encoder" : "Keypad",
         coordinates: { column: 0, row: 0 },
         isInMultiAction: false,
         settings: { controlId, ...extra },
@@ -530,25 +532,30 @@ test("SDK の画像更新として進行中のアニメーションを送信す�
   assert.deepEqual(f.switches(), [], "アニメーションで画面を移動しない");
 });
 
-test("状態ボタンは旧割当を独立移行しダイヤル回転と連動せず短押しだけ移動する", async (t) => {
+test("状態ボタンの移行と長押し再割当で既存コマンドキーの対象を変えない", async (t) => {
   const f = await fixture(t, {
     workspaceSelections: { main: { workspaceId: "a", workspaceName: "A" } },
-    prReviewLaunches: { keep: { status: "unknown" } },
   });
   f.appear("key-main", "key", "main");
-  f.appear("key-mirror", "key", "main");
-  f.appear("dial-main", "dial", "main");
+  f.appear("run", "command", "main", {
+    mode: "shell",
+    body: "npm test",
+    label: "テスト",
+  });
   await f.wait((m) => m.event === "setSettings" && m.context === "key-main");
   await f.wait(imageContains("key-main", "A"));
-  const start = f.history.length;
-  f.send("dialRotate", "dial-main", "dial", { ticks: 1, pressed: false });
-  await f.wait(
-    (m) => m.event === "setFeedback" && m.payload.workspace === "B",
-    start,
-  );
+  await f.wait(imageContains("run", "A"));
+  const snap = snapshot(["a", "b"]);
+  snap.result.worktrees[1].isActive = true;
+  f.setSnapshot(snap);
+  f.send("keyDown", "key-main", "key");
+  await f.wait((m) => m.event === "showOk" && m.context === "key-main");
+  f.send("keyUp", "key-main", "key");
+  f.send("keyDown", "run", "command");
+  await f.wait((m) => m.event === "showOk" && m.context === "run");
   assert.equal(
-    f.history.slice(start).some(imageContains("key-main", "B")),
-    false,
+    f.executions()[0][f.executions()[0].indexOf("--worktree") + 1],
+    "id:a",
   );
   f.send("keyDown", "key-main", "key");
   f.send("keyUp", "key-main", "key");
@@ -556,9 +563,8 @@ test("状態ボタンは旧割当を独立移行しダイヤル回転と連動�
   while (!f.switches().length && Date.now() < deadline)
     await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(f.switches(), [
-    ["terminal", "switch", "--terminal", "fresh-a", "--json"],
+    ["terminal", "switch", "--terminal", "fresh-b", "--json"],
   ]);
-  assert.equal(f.settings.prReviewLaunches.keep.status, "unknown");
 });
 
 test("未割当ボタンは先頭WSを選ばずkeyDownだけでは移動しない", async (t) => {
@@ -611,19 +617,17 @@ test("SDK長押しはAIなしの画面選択WSを登録し移動せず他ボタ�
   assert.deepEqual(f.executions(), []);
 });
 
-test("設定だけでは実行せず、回転直後のコマンドボタンで選択先に一度だけシェルを起動する", async (t) => {
-  const f = await fixture(t);
-  f.appear("key-main", "key", "main");
-  f.appear("dial-main", "dial", "main");
+test("ダイヤルがなくても保存済み対象で一度だけコマンドを実行し、設定だけでは実行しない", async (t) => {
+  const f = await fixture(t, {
+    workspaceSelections: { main: { workspaceId: "b", workspaceName: "B" } },
+  });
   f.appear("run", "command", "main", {
     mode: "shell",
     body: "npm test",
     label: "テスト",
   });
-  await f.wait(imageContains("run", "A"));
+  await f.wait(imageContains("run", "B"));
   assert.deepEqual(f.executions(), []);
-  f.setRows(["a", "c"]);
-  f.send("dialRotate", "dial-main", "dial", { ticks: 1, pressed: false });
   f.send("keyDown", "run", "command");
   f.send("keyDown", "run", "command");
   await f.wait((m) => m.event === "showOk" && m.context === "run");
@@ -632,7 +636,7 @@ test("設定だけでは実行せず、回転直後のコマンドボタンで�
       "terminal",
       "create",
       "--worktree",
-      "id:c",
+      "id:b",
       "--title",
       "テスト",
       "--command",
@@ -641,7 +645,7 @@ test("設定だけでは実行せず、回転直後のコマンドボタンで�
       "--json",
     ],
   ]);
-  await f.wait(imageContains("run", "C"));
+  await f.wait(imageContains("run", "B"));
 });
 
 test("AI ボタンで指示を送り、古いプロセスを指定した設定では再送しない", async (t) => {

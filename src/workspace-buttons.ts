@@ -269,9 +269,7 @@ export class WorkspaceButtons {
           "キーの表示を更新しています。表示を確認して、もう一度押してください。",
         );
       if (!binding.settings.workspaceId)
-        throw new Error(
-          "ワークスペースの取得を待って、ダイヤルで表示対象を選んでください。",
-        );
+        throw new Error("Orca でWSを選び、長押しで登録してください。");
       if (binding.display?.context.ambiguous) throw new Error(ambiguousMessage);
       await this.client.focusWorkspace(binding.settings.workspaceId, isCurrent);
     } catch (error) {

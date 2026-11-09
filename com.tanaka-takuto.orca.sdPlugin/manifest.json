@@ -106,27 +106,6 @@
       ]
     },
     {
-      "Name": "ワークスペース切り替え",
-      "UUID": "com.tanaka-takuto.orca.workspace-dial",
-      "Icon": "imgs/action-icon",
-      "Tooltip": "回転で全候補を選び、押し込みで次の入力待ちへ切り替えます。同じ操作 ID のコマンドキー・レーダーに反映します。状態ボタンは独立です。",
-      "PropertyInspectorPath": "ui/workspace-dial.html",
-      "Controllers": ["Encoder"],
-      "Encoder": {
-        "layout": "ui/workspace-dial.json",
-        "TriggerDescription": {
-          "Rotate": "コマンドキー・レーダーの対象WSを選ぶ",
-          "Push": "次の入力待ちワークスペースを選ぶ"
-        }
-      },
-      "States": [
-        {
-          "Image": "imgs/key",
-          "ShowTitle": false
-        }
-      ]
-    },
-    {
       "Name": "並列変更レーダー",
       "UUID": "com.tanaka-takuto.orca.change-radar",
       "Icon": "imgs/action-icon",

@@ -4,17 +4,13 @@ import { AttentionAction } from "./actions/attention";
 import { ChangeRadarAction } from "./actions/change-radar";
 import { PRReviewAction } from "./actions/pr-review";
 import { WorkspaceCommandAction } from "./actions/workspace-command";
-import {
-  WorkspaceDialAction,
-  WorkspaceStatusAction,
-} from "./actions/workspace-status";
+import { WorkspaceStatusAction } from "./actions/workspace-status";
 import { workspaceService } from "./workspace-service";
 
 streamDeck.devices.onDeviceDidDisconnect((ev) =>
   workspaceService.status.disconnect(ev.device.id),
 );
 streamDeck.actions.registerAction(new WorkspaceStatusAction());
-streamDeck.actions.registerAction(new WorkspaceDialAction());
 streamDeck.actions.registerAction(new WorkspaceCommandAction());
 streamDeck.actions.registerAction(new ActiveAiInputAction());
 streamDeck.actions.registerAction(new AttentionAction());

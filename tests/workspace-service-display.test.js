@@ -147,47 +147,24 @@ for (const variant of [
   });
 }
 
-test("ダイヤルも長名の末尾と共通タグを表示し、位置の既存契約を保つ", async (t) => {
-  const f = await fixture(t);
-  const feedbacks = [];
-  f.rows[0].name = "個人事業主テックビーバーのとても長い改善ループ123";
-  f.service.bindDial(
-    {
-      id: "dial",
-      async setFeedback(view) {
-        feedbacks.push(view);
-      },
-    },
-    "main",
-  );
-  t.after(() => f.service.unbind("dial"));
-  await tick();
-  const feedback = feedbacks.at(-1);
-  assert.match(feedback.workspace + feedback.workspace2, /個人.*123/u);
-  assert.match(feedback.identity, /P · /u);
-  assert.equal(feedback.position, "2 / 2");
-});
-
-test("状態と実行の詳細に同じ完全ID・プロジェクト・パス・短タグを返し、消失時は古いパスを出さない", async (t) => {
+test("実行の詳細に完全ID・プロジェクト・パス・短タグを返し、消失時は古いパスを出さない", async (t) => {
   const f = await fixture(t);
   const views = [];
   f.sdk.ui.action = f.key;
   f.sdk.ui.sendToPropertyInspector = async (view) => views.push(view);
   f.service.bindCommand(f.key, { body: "test", mode: "shell" });
   await f.service.sendExecutionView(f.key.id, "command", false);
-  await f.service.sendView(f.key.id, "status");
   for (const view of views) {
     assert.equal(view.workspaceIdentity.id, "A");
     assert.equal(view.workspaceIdentity.project, "P");
     assert.equal(view.workspaceIdentity.path, "/A");
     assert.ok(view.workspaceIdentity.tag);
   }
-  assert.deepEqual(views[0].workspaceIdentity, views[1].workspaceIdentity);
   f.rows[0].project = "\u0001　 ";
-  await f.service.sendView(f.key.id, "empty-project");
+  await f.service.sendExecutionView(f.key.id, "empty-project", false);
   assert.equal(views.at(-1).workspaceIdentity.projectLabel, "未取得");
   f.rows.splice(0, 1);
-  await f.service.sendView(f.key.id, "missing");
+  await f.service.sendExecutionView(f.key.id, "missing", false);
   assert.equal(views.at(-1).workspaceIdentity.id, "A");
   assert.equal(views.at(-1).workspaceIdentity.path, undefined);
   assert.equal(views.at(-1).workspaceIdentity.project, undefined);
@@ -258,29 +235,6 @@ test("同じ宛先でも設定変更後の画像が未確定なら新しい本�
   assert.deepEqual(f.executions, [{ id: "A", body: "new" }]);
 });
 
-test("明示的なダイヤル更新待ちでも、実際の対象名の表示完了までは実行しない", async (t) => {
-  const f = await fixture(t);
-  f.service.bindCommand(f.key, {
-    controlId: "main",
-    mode: "shell",
-    body: "test",
-  });
-  f.service.bindDial({ id: "dial", async setFeedback() {} }, "main");
-  t.after(() => f.service.unbind("dial"));
-  await tick();
-  f.block((s) => s.includes(">B</text>"));
-  const rotate = f.service.rotate("dial", 1);
-  const execute = f.service.execute(f.key.id);
-  await tick();
-  await tick();
-  assert.deepEqual(f.executions, []);
-  await f.release();
-  await rotate;
-  await execute;
-  assert.deepEqual(f.executions, [{ id: "B", body: "test" }]);
-  assert.match(f.visible, />B<\/text>/u);
-});
-
 test("実行中に選択が変わっても、表示中の実行先と次に使う宛先を混ぜない", async (t) => {
   const f = await fixture(t);
   f.service.bindCommand(f.key, {
@@ -330,46 +284,6 @@ test("新しい対象の画像送信失敗は、その後の押下で実行を�
   assert.deepEqual(f.executions, []);
 });
 
-for (const kind of ["command"]) {
-  test(`${kind}: 選択取得待ちの押下後に追加ダイヤルが来たら、新しい対象へ追従しない`, async (t) => {
-    const f = await fixture(t);
-    const opened = [];
-    f.service.client.focusWorkspace = async (id) => {
-      opened.push(id);
-      return true;
-    };
-    f.service.bindCommand(f.key, {
-      controlId: "main",
-      mode: "shell",
-      body: "test",
-    });
-    f.service.bindDial({ id: "dial", async setFeedback() {} }, "main");
-    t.after(() => f.service.unbind("dial"));
-    await tick();
-    const previous = f.service.monitor.state.snapshot;
-    let release;
-    f.service.client.snapshot = async () => {
-      await new Promise((resolve) => {
-        release = resolve;
-      });
-      return {
-        ...previous,
-        workspaces: [
-          ...previous.workspaces,
-          { ...previous.workspaces[1], id: "C", name: "C", path: "/C" },
-        ],
-      };
-    };
-    const first = f.service.rotate("dial", 1);
-    const press = f.service.execute(f.key.id);
-    const second = f.service.rotate("dial", 1);
-    release();
-    await Promise.all([first, press, second]);
-    assert.deepEqual(opened, []);
-    assert.deepEqual(f.executions, []);
-  });
-}
-
 test("実行中に設定を変えても、新しい操作を要求中と表示しない", async (t) => {
   const f = await fixture(t);
   f.service.bindCommand(f.key, {
@@ -399,48 +313,6 @@ test("実行中に設定を変えても、新しい操作を要求中と表示�
   await running;
 });
 
-for (const kind of ["command"]) {
-  test(`${kind}: 一覧取得と画像の共通期限を過ぎた旧押下は、遅い取得後も作用しない`, async (t) => {
-    const f = await fixture(t);
-    const opened = [];
-    f.service.client.focusWorkspace = async (id) => {
-      opened.push(id);
-      return true;
-    };
-    f.service.bindCommand(f.key, {
-      controlId: "main",
-      mode: "shell",
-      body: "test",
-    });
-    f.service.bindDial({ id: "dial", async setFeedback() {} }, "main");
-    t.after(() => f.service.unbind("dial"));
-    await tick();
-    const snapshot = f.service.monitor.state.snapshot;
-    let release;
-    f.service.client.snapshot = async () => {
-      await new Promise((resolve) => {
-        release = resolve;
-      });
-      return snapshot;
-    };
-    t.mock.timers.enable({ apis: ["setTimeout"] });
-    const rotate = f.service.rotate("dial", 1);
-    const press = f.service.execute(f.key.id);
-    let settled = false;
-    void press.then(() => {
-      settled = true;
-    });
-    await tick();
-    t.mock.timers.tick(2000);
-    await tick();
-    assert.equal(settled, true, "旧押下の待機は共通期限で終わる");
-    release();
-    await Promise.all([rotate, press]);
-    await tick();
-    assert.deepEqual(opened, []);
-    assert.deepEqual(f.executions, []);
-  });
-}
 test("global取得失敗を旧割当なしと扱わず、移行フラグと旧IDを保存変更しない", async (t) => {
   const f = await fixture(t);
   const initial = { controlId: "main", custom: "keep" };

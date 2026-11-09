@@ -62,7 +62,7 @@ export class WorkspaceExecutor {
     const workspace = snapshot.workspaces.find((row) => row.id === workspaceId);
     if (!workspace)
       throw new Error(
-        "対象のワークスペースを取得できません。ダイヤルで選び直してください。",
+        "対象のワークスペースを取得できません。設定の対象を確認してください。",
       );
     return { snapshot, workspace };
   }

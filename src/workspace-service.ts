@@ -1,8 +1,6 @@
-import streamDeck, { type DialAction } from "@elgato/streamdeck";
+import streamDeck from "@elgato/streamdeck";
 import { AttentionButtons } from "./attention-buttons";
 import { commandImage } from "./command-image";
-import { settleDisplay } from "./display-wait";
-import { shorten, twoLines } from "./key-text";
 import { createCliRunner, OrcaClient } from "./orca/client";
 import {
   type AgentDirectory,
@@ -13,11 +11,7 @@ import {
 import { WorkspaceMonitor } from "./orca/monitor";
 import { type PluginSettings, updatePluginSettings } from "./plugin-settings";
 import type { WorkspaceKey } from "./workspace-buttons";
-import {
-  ambiguousMessage,
-  identityLine,
-  type WorkspaceIdentity,
-} from "./workspace-identity";
+import { ambiguousMessage, type WorkspaceIdentity } from "./workspace-identity";
 import {
   type ControlView,
   normalizeControlId,
@@ -108,8 +102,6 @@ class WorkspaceService {
     (id, selection) => this.remember(id, selection),
   );
   private readonly bindings = new Map<string, Binding>();
-  private readonly selectionUpdates = new Map<string, Promise<boolean>>();
-  private readonly selectionVersions = new Map<string, number>();
   private readonly commandRenders = new Map<string, Promise<void>>();
   private readonly executions = new Map<string, ExecutionRecord>();
   private navigationVersion = 0;
@@ -181,57 +173,6 @@ class WorkspaceService {
         .sendToPropertyInspector({ type: "error", actionId, message })
         .catch((error: unknown) => streamDeck.logger.error(error));
     }
-  }
-
-  bindDial(dial: DialAction<ControlSettings>, controlId: string): void {
-    this.unbind(dial.id);
-    const binding: Binding = {
-      controlId: normalizeControlId(controlId),
-      renderVersion: 0,
-      queue: Promise.resolve(),
-    };
-    this.bindings.set(dial.id, binding);
-    binding.stop = this.selections.subscribe(binding.controlId, (view) => {
-      const rendered = JSON.stringify([
-        view.controlId,
-        view.workspaceName,
-        view.identity,
-        view.status,
-        view.available,
-        view.index,
-      ]);
-      if (binding.lastSelection === rendered) return;
-      binding.lastSelection = rendered;
-      const version = ++binding.renderVersion;
-      binding.queue = binding.queue
-        .catch(() => {})
-        .then(async () => {
-          if (
-            this.bindings.get(dial.id) !== binding ||
-            binding.renderVersion !== version
-          )
-            return;
-          await dial.setFeedback({
-            title: `${shorten(view.controlId, 15)} · ${labels[view.status]}`,
-            workspace: twoLines(view.workspaceName, 20)[0],
-            workspace2: twoLines(view.workspaceName, 20)[1],
-            identity: view.identity?.ambiguous
-              ? "表示重複・詳細で照合"
-              : identityLine(view.identity),
-            position: view.available
-              ? `${view.index >= 0 ? view.index + 1 : "—"} / ${view.available}`
-              : "候補なし",
-          });
-        });
-      void binding.queue.catch((error: unknown) =>
-        this.report(
-          dial.id,
-          error instanceof Error
-            ? error.message
-            : "ダイヤル表示を更新できません。",
-        ),
-      );
-    });
   }
 
   unbind(actionId: string): void {
@@ -371,11 +312,6 @@ class WorkspaceService {
     const record = this.executions.get(actionId) ?? { busy: false };
     if (record.busy) return;
     const shown = binding.displayed;
-    const selectionVersion = this.selectionVersions.get(binding.controlId) ?? 0;
-    const sameSelection = () =>
-      (this.selectionVersions.get(binding.controlId) ?? 0) === selectionVersion;
-    const waitForSelection = this.selectionUpdates.has(binding.controlId);
-    const displayDeadline = Date.now() + 2_000;
     this.executions.set(actionId, record);
     record.busy = true;
     record.result = undefined;
@@ -386,50 +322,14 @@ class WorkspaceService {
     record.command = binding.command;
     this.renderCommand(binding, this.selections.view(binding.controlId));
     try {
-      let pending = this.selectionUpdates.get(binding.controlId);
-      while (pending) {
-        if (!(await settleDisplay(pending, displayDeadline - Date.now())))
-          throw new Error(
-            "選択とキーの表示を時間内に確認できません。表示を確認して、もう一度押してください。",
-          );
-        if (!(await pending))
-          throw new Error(
-            "ワークスペース一覧を更新できません。Orca 側を確認してください。",
-          );
-        if (!sameSelection()) return;
-        pending = this.selectionUpdates.get(binding.controlId);
-      }
-      if (this.bindings.get(actionId) !== binding || !sameSelection()) return;
+      if (this.bindings.get(actionId) !== binding) return;
       const view = this.selections.view(binding.controlId);
       if (!view.workspaceId)
-        throw new Error("ダイヤルで対象ワークスペースを選んでください。");
+        throw new Error(
+          "保存済みの対象ワークスペースを確認できません。設定を確認してください。",
+        );
       if (view.identity?.ambiguous) throw new Error(ambiguousMessage);
-      if (waitForSelection) {
-        while (
-          this.bindings.get(actionId) === binding &&
-          (binding.displayed?.workspaceId !== view.workspaceId ||
-            binding.displayed.command !== binding.command)
-        ) {
-          if (
-            this.selectionUpdates.has(binding.controlId) ||
-            !sameSelection() ||
-            this.selections.view(binding.controlId).workspaceId !==
-              view.workspaceId
-          )
-            return;
-          if (
-            !(await settleDisplay(binding.queue, displayDeadline - Date.now()))
-          )
-            throw new Error(
-              "キーの表示を確認できません。表示を確認して、もう一度押してください。",
-            );
-        }
-        if (this.bindings.get(actionId) !== binding) return;
-        if (Date.now() >= displayDeadline)
-          throw new Error(
-            "選択とキーの表示を時間内に確認できません。表示を確認して、もう一度押してください。",
-          );
-      } else if (
+      if (
         !shown ||
         shown.workspaceId !== view.workspaceId ||
         shown.command !== binding.command
@@ -443,8 +343,6 @@ class WorkspaceService {
       record.workspaceIdentity = view.identity;
       const current = () =>
         this.bindings.get(actionId) === binding &&
-        sameSelection() &&
-        !this.selectionUpdates.has(binding.controlId) &&
         this.selections.view(binding.controlId).workspaceId ===
           view.workspaceId;
       this.renderCommand(binding, view);
@@ -507,11 +405,6 @@ class WorkspaceService {
     const binding = this.bindings.get(actionId);
     if (!binding?.command) return;
     await this.monitor.refresh();
-    let pending = this.selectionUpdates.get(binding.controlId);
-    while (pending) {
-      await pending;
-      pending = this.selectionUpdates.get(binding.controlId);
-    }
     const selected = this.selections.view(binding.controlId);
     let directory: AgentDirectory | undefined;
     let targetError: string | undefined;
@@ -549,73 +442,6 @@ class WorkspaceService {
       lastResult: record?.result
         ? { ...record.result, workspaceName: record.workspaceName ?? "未選択" }
         : undefined,
-    });
-  }
-
-  async rotate(actionId: string, ticks: number): Promise<void> {
-    if (!Number.isFinite(ticks) || !Math.trunc(ticks)) return;
-    await this.updateSelection(actionId, (id) =>
-      this.selections.rotate(id, ticks),
-    );
-  }
-  async selectNextWaiting(actionId: string): Promise<void> {
-    await this.updateSelection(actionId, (id) =>
-      this.selections.selectNextWaiting(id),
-    );
-  }
-
-  private updateSelection(
-    actionId: string,
-    change: (id: string) => void,
-  ): Promise<boolean> {
-    const binding = this.bindings.get(actionId);
-    if (!binding) return Promise.resolve(false);
-    const id = binding.controlId;
-    this.selectionVersions.set(id, (this.selectionVersions.get(id) ?? 0) + 1);
-    // 取得中の通信は monitor が共有し、連続する操作は入力順に適用する。
-    const previous = this.selectionUpdates.get(id) ?? Promise.resolve(true);
-    const next = Promise.all([
-      previous.catch(() => false),
-      this.monitor.refresh(),
-    ]).then(([, state]) => {
-      if (!state.snapshot || this.bindings.get(actionId) !== binding)
-        return false;
-      change(id);
-      return true;
-    });
-    this.selectionUpdates.set(id, next);
-    const cleanup = () => {
-      if (this.selectionUpdates.get(id) === next)
-        this.selectionUpdates.delete(id);
-    };
-    void next.then(cleanup, cleanup);
-    return next;
-  }
-  async sendView(actionId: string, requestId: string): Promise<void> {
-    const binding = this.bindings.get(actionId);
-    if (!binding) return;
-    await this.monitor.refresh();
-    let pending = this.selectionUpdates.get(binding.controlId);
-    while (pending) {
-      await pending;
-      pending = this.selectionUpdates.get(binding.controlId);
-    }
-    if (
-      this.bindings.get(actionId) !== binding ||
-      streamDeck.ui.action?.id !== actionId
-    )
-      return;
-    const view: ControlView = this.selections.view(binding.controlId);
-    await streamDeck.ui.sendToPropertyInspector({
-      type: "control-view",
-      actionId,
-      requestId,
-      controlId: view.controlId,
-      workspaceName: view.workspaceName,
-      workspaceIdentity: view.identity,
-      status: labels[view.status],
-      available: view.available,
-      error: view.error,
     });
   }
 }

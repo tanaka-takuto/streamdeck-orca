@@ -108,7 +108,7 @@ function fixture(kind) {
   };
 }
 
-for (const kind of ["dial", "command"]) {
+for (const kind of ["command"]) {
   test(`${kind}で同じ操作IDの設定保存中にも、古い応答からパスを復活させない`, () => {
     const f = fixture(kind);
     const oldRequestId = f.requestId;

@@ -1,7 +1,5 @@
 import streamDeck, {
   action,
-  type DialDownEvent,
-  type DialRotateEvent,
   type DidReceiveSettingsEvent,
   type KeyDownEvent,
   type KeyUpEvent,
@@ -10,23 +8,8 @@ import streamDeck, {
   type WillAppearEvent,
   type WillDisappearEvent,
 } from "@elgato/streamdeck";
-import { normalizeControlId } from "../workspace-selections";
-import { type ControlSettings, workspaceService } from "../workspace-service";
+import { workspaceService } from "../workspace-service";
 import type { WorkspaceButtonSettings } from "../workspace-status-controller";
-
-type ControlMessage = { type: string; requestId: string };
-async function sendView(
-  ev: SendToPluginEvent<ControlMessage, ControlSettings>,
-): Promise<void> {
-  if (
-    ev.payload &&
-    typeof ev.payload === "object" &&
-    ev.payload.type === "get-control" &&
-    typeof ev.payload.requestId === "string"
-  ) {
-    await workspaceService.sendView(ev.action.id, ev.payload.requestId);
-  }
-}
 
 @action({ UUID: "com.tanaka-takuto.orca.workspace-status" })
 export class WorkspaceStatusAction extends SingletonAction<WorkspaceButtonSettings> {
@@ -88,41 +71,5 @@ export class WorkspaceStatusAction extends SingletonAction<WorkspaceButtonSettin
         requestId: message.requestId,
         ...view,
       });
-  }
-}
-
-@action({ UUID: "com.tanaka-takuto.orca.workspace-dial" })
-export class WorkspaceDialAction extends SingletonAction<ControlSettings> {
-  override onWillAppear(ev: WillAppearEvent<ControlSettings>): void {
-    if (ev.action.isDial())
-      workspaceService.bindDial(
-        ev.action,
-        normalizeControlId(ev.payload.settings.controlId),
-      );
-  }
-  override onDidReceiveSettings(
-    ev: DidReceiveSettingsEvent<ControlSettings>,
-  ): void {
-    if (ev.action.isDial())
-      workspaceService.bindDial(
-        ev.action,
-        normalizeControlId(ev.payload.settings.controlId),
-      );
-  }
-  override onWillDisappear(ev: WillDisappearEvent<ControlSettings>): void {
-    workspaceService.unbind(ev.action.id);
-  }
-  override async onDialRotate(
-    ev: DialRotateEvent<ControlSettings>,
-  ): Promise<void> {
-    await workspaceService.rotate(ev.action.id, ev.payload.ticks);
-  }
-  override async onDialDown(ev: DialDownEvent<ControlSettings>): Promise<void> {
-    await workspaceService.selectNextWaiting(ev.action.id);
-  }
-  override async onSendToPlugin(
-    ev: SendToPluginEvent<ControlMessage, ControlSettings>,
-  ): Promise<void> {
-    await sendView(ev);
   }
 }
