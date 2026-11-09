@@ -6,6 +6,7 @@ import {
   attentionWorkspace,
   matchesAttentionTarget,
 } from "../attention";
+import { parseWorkspaceSelection } from "./active-selection";
 import {
   type OrcaSnapshot,
   type OrcaTerminal,
@@ -19,6 +20,7 @@ import {
   createWorkspaceActivator,
   type WorkspaceActivator,
 } from "./workspace-activation";
+import { parseReferences } from "./workspace-references";
 
 export type CliRunner = (args: string[]) => Promise<unknown>;
 
@@ -90,13 +92,50 @@ export class OrcaClient {
     );
   }
 
+  async selectedWorkspace() {
+    const status = readResponse(await this.run(["status", "--json"]));
+    const app = object(status.result.app);
+    if (app.running !== true || app.desktopWindowStatus !== "available")
+      throw new Error(
+        "Orca の画面を確認できません。ウィンドウを開いてWSを選んでください。",
+      );
+    const selected = parseWorkspaceSelection(
+      await this.run(["worktree", "ps", "--limit", "200", "--json"]),
+    );
+    if (selected.runtimeId !== status.runtimeId)
+      throw new Error(
+        "Orca の実行環境が変わりました。もう一度長押ししてください。",
+      );
+    return selected;
+  }
+
+  async references(workspaceId: string, runtimeId: string) {
+    return parseReferences(
+      await this.run([
+        "reference",
+        "list",
+        "--worktree",
+        `id:${workspaceId}`,
+        "--json",
+      ]),
+      workspaceId,
+      runtimeId,
+    );
+  }
+
   async focusWorkspace(
     workspaceId: string,
     isCurrent = () => true,
     expected?: AttentionTarget,
+    expectedRuntimeId?: string,
+    expectedInstanceId?: string,
   ): Promise<boolean> {
     const snapshot = await this.snapshot();
     if (!isCurrent()) return false;
+    if (expectedRuntimeId && snapshot.runtimeId !== expectedRuntimeId)
+      throw new Error(
+        "Orca の実行環境が変わりました。もう一度押してください。",
+      );
     if (
       expected &&
       (workspaceId !== expected.workspaceId ||
@@ -109,6 +148,10 @@ export class OrcaClient {
     if (!workspace)
       throw new Error(
         "割り当てたワークスペースを取得できません。設定を確認してください。",
+      );
+    if (expectedInstanceId && workspace.instanceId !== expectedInstanceId)
+      throw new Error(
+        "割当WSの実体が変わりました。長押しで登録し直してください。",
       );
     if (expected) workspace = attentionWorkspace(workspace);
     if (

@@ -330,7 +330,7 @@ test("新しい対象の画像送信失敗は、その後の押下で実行を�
   assert.deepEqual(f.executions, []);
 });
 
-for (const kind of ["status", "command"]) {
+for (const kind of ["command"]) {
   test(`${kind}: 選択取得待ちの押下後に追加ダイヤルが来たら、新しい対象へ追従しない`, async (t) => {
     const f = await fixture(t);
     const opened = [];
@@ -338,13 +338,11 @@ for (const kind of ["status", "command"]) {
       opened.push(id);
       return true;
     };
-    if (kind === "status") f.service.bindKey(f.key, "main");
-    else
-      f.service.bindCommand(f.key, {
-        controlId: "main",
-        mode: "shell",
-        body: "test",
-      });
+    f.service.bindCommand(f.key, {
+      controlId: "main",
+      mode: "shell",
+      body: "test",
+    });
     f.service.bindDial({ id: "dial", async setFeedback() {} }, "main");
     t.after(() => f.service.unbind("dial"));
     await tick();
@@ -363,10 +361,7 @@ for (const kind of ["status", "command"]) {
       };
     };
     const first = f.service.rotate("dial", 1);
-    const press =
-      kind === "status"
-        ? f.service.press(f.key.id)
-        : f.service.execute(f.key.id);
+    const press = f.service.execute(f.key.id);
     const second = f.service.rotate("dial", 1);
     release();
     await Promise.all([first, press, second]);
@@ -404,7 +399,7 @@ test("実行中に設定を変えても、新しい操作を要求中と表示�
   await running;
 });
 
-for (const kind of ["status", "command"]) {
+for (const kind of ["command"]) {
   test(`${kind}: 一覧取得と画像の共通期限を過ぎた旧押下は、遅い取得後も作用しない`, async (t) => {
     const f = await fixture(t);
     const opened = [];
@@ -412,13 +407,11 @@ for (const kind of ["status", "command"]) {
       opened.push(id);
       return true;
     };
-    if (kind === "status") f.service.bindKey(f.key, "main");
-    else
-      f.service.bindCommand(f.key, {
-        controlId: "main",
-        mode: "shell",
-        body: "test",
-      });
+    f.service.bindCommand(f.key, {
+      controlId: "main",
+      mode: "shell",
+      body: "test",
+    });
     f.service.bindDial({ id: "dial", async setFeedback() {} }, "main");
     t.after(() => f.service.unbind("dial"));
     await tick();
@@ -432,10 +425,7 @@ for (const kind of ["status", "command"]) {
     };
     t.mock.timers.enable({ apis: ["setTimeout"] });
     const rotate = f.service.rotate("dial", 1);
-    const press =
-      kind === "status"
-        ? f.service.press(f.key.id)
-        : f.service.execute(f.key.id);
+    const press = f.service.execute(f.key.id);
     let settled = false;
     void press.then(() => {
       settled = true;
@@ -451,3 +441,17 @@ for (const kind of ["status", "command"]) {
     assert.deepEqual(f.executions, []);
   });
 }
+test("global取得失敗を旧割当なしと扱わず、移行フラグと旧IDを保存変更しない", async (t) => {
+  const f = await fixture(t);
+  const initial = { controlId: "main", custom: "keep" };
+  const writes = [];
+  f.sdk.settings.getGlobalSettings = async () => {
+    throw Error("temporary offline");
+  };
+  f.key.getSettings = async () => initial;
+  f.key.setSettings = async (value) => writes.push(value);
+  await f.service.initialize();
+  await f.service.status.bind(f.key, initial);
+  t.after(() => f.service.status.unbind(f.key.id));
+  assert.deepEqual(writes, []);
+});

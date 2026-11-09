@@ -32,6 +32,7 @@ type Binding = {
   display?: { name: string; status: DisplayStatus; context: KeyContext };
   busy: boolean;
   displayed: boolean;
+  feedback?: string;
 };
 
 const styles: Record<
@@ -43,7 +44,7 @@ const styles: Record<
   review: { color: "#086a64", symbol: "!", lines: ["返答あり", "要確認"] },
   idle: { color: "#374151", symbol: "−", lines: ["待機"] },
   unknown: { color: "#55384f", symbol: "?", lines: ["状態不明"] },
-  unassigned: { color: "#30343b", symbol: "−", lines: ["候補なし"] },
+  unassigned: { color: "#30343b", symbol: "−", lines: ["未割当"] },
 };
 
 export function keyImage(
@@ -51,22 +52,25 @@ export function keyImage(
   status: DisplayStatus,
   frame = 0,
   context?: KeyContext,
+  feedback?: string,
 ): string {
   const style = styles[status];
   const [first, second] = twoLines(name);
-  const hint = context?.ambiguous
-    ? "表示重複・要照合"
-    : status === "review"
-      ? "要確認・開く"
-      : status === "unassigned"
-        ? "ダイヤルで選択"
-        : "押して開く";
+  const hint =
+    feedback ||
+    (context?.ambiguous
+      ? "表示重複・要照合"
+      : status === "review"
+        ? "要確認・開く"
+        : status === "unassigned"
+          ? "長押しで登録"
+          : "短押しで移動");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
 <rect width="144" height="144" rx="16" fill="${style.color}"/>
 <g fill="#fff" font-family="-apple-system, sans-serif" text-anchor="middle">
-${svgText(`ID ${shorten(context?.controlId || "main", 11)} · 開く`, 19, 12)}
-${svgText(identityLine(context), 35, 12)}
-${svgText(first, 57, 16)}${svgText(second, 77, 16)}
+${context?.controlId ? svgText(`ID ${shorten(context.controlId, 11)} · 開く`, 19, 12) : ""}
+${svgText(identityLine(context), context?.controlId ? 35 : 25, 12)}
+${svgText(first, 54, context?.controlId ? 16 : 18)}${svgText(second, 77, context?.controlId ? 16 : 18)}
 ${
   status === "working"
     ? `<g fill="none" stroke="#fff" stroke-width="3"><circle cx="22" cy="100" r="8" opacity="0.25"/><path d="M22 92 A8 8 0 0 1 30 100" stroke-linecap="round" transform="rotate(${(frame % 12) * 30} 22 100)"/></g>`
@@ -123,11 +127,9 @@ export class WorkspaceButtons {
     );
     const status = binding.settings.workspaceId
       ? getWorkspaceStatus(workspace)
-      : state.snapshot
-        ? "unassigned"
-        : "unknown";
+      : "unassigned";
     binding.display = {
-      name: workspace?.name ?? binding.settings.workspaceName ?? "Workspace",
+      name: workspace?.name ?? binding.settings.workspaceName ?? "未割当",
       status,
       context: {
         ...workspaceIdentity(
@@ -179,6 +181,7 @@ export class WorkspaceButtons {
       binding.display.status,
       this.animationFrame,
       binding.display.context,
+      binding.feedback,
     );
     if (binding.desiredImage === image)
       return this.renders.get(binding.key.id) ?? Promise.resolve();
@@ -213,6 +216,24 @@ export class WorkspaceButtons {
         this.renders.delete(binding.key.id);
     });
     return next;
+  }
+
+  feedback(actionId: string, message?: string): void {
+    const binding = this.bindings.get(actionId);
+    if (!binding) return;
+    binding.feedback = message;
+    void this.draw(binding);
+  }
+
+  assertReady(actionId: string): void {
+    const binding = this.bindings.get(actionId);
+    if (!binding?.displayed)
+      throw new Error(
+        "キーの表示を更新しています。表示後にもう一度押してください。",
+      );
+    if (!binding.settings.workspaceId)
+      throw new Error("未割当：Orca でWSを選び、長押しで登録してください。");
+    if (binding.display?.context.ambiguous) throw new Error(ambiguousMessage);
   }
 
   async waitForDisplay(

@@ -1,86 +1,74 @@
-const controlInput = document.getElementById("control-id");
-const apply = document.getElementById("apply");
-const message = document.getElementById("message");
-const workspaceName = document.getElementById("workspace-name");
-const workspaceStatus = document.getElementById("workspace-status");
-const workspaceIdentity = document.getElementById("workspace-identity");
-const refresh = document.getElementById("refresh");
+const byId = (id) => document.getElementById(id);
+const name = byId("workspace-name");
+const identity = byId("workspace-identity");
+const status = byId("workspace-status");
+const links = byId("reference");
+const linkStatus = byId("link-status");
+const save = byId("save-reference");
+const refresh = byId("refresh");
+const message = byId("message");
 let socket;
 let inspectorId;
 let actionId;
 let actionUuid;
-let settings = {};
 let requestId;
-let requestTimer;
-let pollTimer;
-let pendingControlId;
-const normalize = (value) =>
-  typeof value === "string" && value.trim() ? value.trim() : "main";
-
-function showMessage(text, error = false) {
+let timer;
+let poll;
+let view;
+let saving = false;
+let baselineChoice = "";
+const labels = {
+  working: "進行中",
+  waiting: "入力待ち",
+  review: "返答あり・要確認",
+  idle: "待機",
+  unknown: "状態不明",
+  unassigned: "未割当",
+};
+function show(text, error = false) {
   message.textContent = text;
   message.dataset.error = String(error);
 }
-
-function send(event, payload) {
-  if (socket?.readyState !== WebSocket.OPEN) return false;
+function request(type = "get-workspace-button", extra = {}) {
+  if (socket?.readyState !== WebSocket.OPEN) return;
+  clearTimeout(timer);
+  clearTimeout(poll);
+  requestId = `${Date.now()}-${Math.random()}`;
+  refresh.disabled = true;
+  save.disabled = true;
+  links.disabled = true;
   socket.send(
     JSON.stringify({
-      event,
+      event: "sendToPlugin",
       context: inspectorId,
-      ...(event === "sendToPlugin" ? { action: actionUuid } : {}),
-      payload,
+      action: actionUuid,
+      payload: { type, requestId, ...extra },
     }),
   );
-  return true;
-}
-
-function requestView() {
-  if (pendingControlId !== undefined) return;
-  const nextId = `${Date.now()}-${Math.random()}`;
-  if (!send("sendToPlugin", { type: "get-control", requestId: nextId })) return;
-  requestId = nextId;
-  refresh.disabled = true;
-  clearTimeout(requestTimer);
-  clearTimeout(pollTimer);
-  requestTimer = setTimeout(() => {
+  timer = setTimeout(() => {
+    requestId = undefined;
+    saving = false;
+    view = undefined;
     refresh.disabled = false;
-    workspaceStatus.textContent = "状態不明";
-    workspaceIdentity.textContent = "対象情報の応答を確認できません。";
-    showMessage(
-      "応答を確認できません。Orca の起動状態を確認して、状態を更新してください。",
-      true,
-    );
-  }, 8_000);
+    status.textContent = "状態不明";
+    linkStatus.textContent = "取得失敗：関連先を確認できません。";
+    show("応答を確認できません。状態を更新して確認してください。", true);
+  }, 8000);
 }
-
-document.getElementById("control-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const controlId = normalize(controlInput.value);
-  const next = { ...settings, controlId };
-  if (!send("setSettings", next)) {
-    showMessage("Stream Deck との接続を確認してください。", true);
-    return;
-  }
-  settings = next;
-  pendingControlId = controlId;
-  controlInput.value = controlId;
-  clearTimeout(pollTimer);
-  clearTimeout(requestTimer);
-  requestId = undefined;
-  workspaceName.textContent = "設定を保存しています…";
-  workspaceStatus.textContent = "";
-  workspaceIdentity.textContent = "保存後に対象情報を取り直します。";
-  showMessage("設定を保存しています…");
-  requestTimer = setTimeout(() => {
-    showMessage(
-      "設定の保存を確認できません。アクションを選び直して確認してください。",
-      true,
-    );
-  }, 8_000);
+refresh.addEventListener("click", () => request());
+links.addEventListener("change", () => {
+  save.disabled = saving || !view || !links.value;
 });
-refresh.addEventListener("click", requestView);
-
+save.addEventListener("click", () => {
+  if (!view?.workspace || !links.value || saving) return;
+  saving = true;
+  show("関連先を保存しています…");
+  request("select-reference", {
+    workspaceId: view.workspace.workspaceId,
+    key: links.value,
+    revision: view.revision,
+  });
+});
 window.connectElgatoStreamDeckSocket = (
   port,
   uuid,
@@ -92,85 +80,97 @@ window.connectElgatoStreamDeckSocket = (
   inspectorId = uuid;
   actionId = action.context;
   actionUuid = action.action;
-  settings = action.payload.settings ?? {};
-  controlInput.value = normalize(settings.controlId);
-  const dial = actionUuid.endsWith(".workspace-dial");
-  document.getElementById("heading").textContent = dial
-    ? "ダイヤルで表示対象を選ぶ"
-    : "ボタンで状態を見て開く";
-  document.getElementById("description").textContent = dial
-    ? "回転で全候補を、押し込みで次の入力待ちを選び、同じ操作 ID のボタンに表示します。入力待ちがなければ現在の選択を維持します。"
-    : "ダイヤルと同じ操作 ID を設定してください。回転で表示対象を選び、このボタンを押すと Orca を開きます。";
   socket = new WebSocket(`ws://127.0.0.1:${port}`);
   socket.addEventListener("open", () => {
     socket.send(JSON.stringify({ event: registerEvent, uuid }));
-    controlInput.disabled = false;
-    apply.disabled = false;
     refresh.disabled = false;
-    requestView();
+    request();
   });
   socket.addEventListener("message", ({ data }) => {
     const event = JSON.parse(data);
     if (event.event === "didReceiveSettings") {
-      const received = event.payload.settings ?? {};
-      if (
-        pendingControlId !== undefined &&
-        normalize(received.controlId) !== pendingControlId
-      )
-        return;
-      pendingControlId = undefined;
-      settings = received;
-      controlInput.value = normalize(settings.controlId);
-      requestView();
+      if (!saving) request();
+      return;
+    }
+    const p = event.payload;
+    if (event.event !== "sendToPropertyInspector" || p?.actionId !== actionId)
+      return;
+    if (p.type === "error") {
+      show(p.message, true);
       return;
     }
     if (
-      event.event !== "sendToPropertyInspector" ||
-      event.payload.actionId !== actionId
-    )
-      return;
-    const payload = event.payload;
-    if (payload.type === "error") {
-      showMessage(payload.message, true);
-      return;
-    }
-    if (
-      pendingControlId !== undefined ||
+      p.type !== "workspace-button-view" ||
       !requestId ||
-      payload.type !== "control-view" ||
-      payload.requestId !== requestId ||
-      payload.controlId !== normalize(settings.controlId)
+      p.requestId !== requestId
     )
       return;
-    clearTimeout(requestTimer);
+    clearTimeout(timer);
+    saving = false;
     refresh.disabled = false;
-    workspaceName.textContent = payload.workspaceName;
-    const identity = payload.workspaceIdentity;
-    workspaceIdentity.textContent = identity
-      ? `プロジェクト: ${identity.projectLabel ?? (identity.project?.trim() ? identity.project : "未取得")}\nパス: ${identity.path ?? "未取得"}\nID: ${identity.id}\n短タグ: ${identity.tag}${identity.ambiguous ? "（表示重複・Orca側で対象を確認）" : ""}`
-      : "対象情報を取得できません。";
-    workspaceStatus.textContent = `${payload.status} · 候補 ${payload.available} 件`;
-    showMessage(
-      payload.error ||
-        "回転で全候補、押し込みで次の入力待ちを選べます。開くときはボタンを押してください。",
-      Boolean(payload.error),
+    const previous = view?.revision === p.revision ? links.value : "";
+    view = p;
+    name.textContent = p.workspaceName;
+    const i = p.workspaceIdentity;
+    identity.textContent = i
+      ? `プロジェクト: ${i.projectLabel ?? i.project ?? "未取得"}\nパス: ${i.path ?? "未取得"}\nID: ${i.id}\n短タグ: ${i.tag}${i.ambiguous ? "（表示重複・要照合）" : ""}`
+      : "長押しで登録";
+    status.textContent = labels[p.status] ?? "状態不明";
+    links.replaceChildren();
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "関連先を選択";
+    links.append(placeholder);
+    for (const ref of p.candidates ?? []) {
+      const o = document.createElement("option");
+      o.value = ref.key;
+      o.textContent = ref.label;
+      links.append(o);
+    }
+    baselineChoice = p.chosen?.key ?? "";
+    links.value = (p.candidates ?? []).some((r) => r.key === previous)
+      ? previous
+      : (p.chosen?.key ?? "");
+    links.disabled = !p.ready || !p.candidates?.length;
+    save.disabled =
+      links.disabled ||
+      !links.value ||
+      links.value === p.settings?.reference?.key;
+    linkStatus.textContent =
+      p.linkError ||
+      (p.chosen
+        ? `${p.chosen.label}\n${p.chosen.url}`
+        : p.workspace
+          ? "関連先を取得できません。"
+          : "WSを長押し登録すると関連先を確認できます。");
+    show(
+      p.error || p.notice || "このボタンの割当は長押しで変更できます。",
+      Boolean(p.error),
     );
-    pollTimer = setTimeout(requestView, 2_000);
+    // Preserve an uncommitted choice; polling must not silently save or replace it.
+    poll = setTimeout(() => {
+      if (!saving && (links.value === baselineChoice || !links.value))
+        request();
+    }, 2000);
   });
   socket.addEventListener("close", () => {
-    clearTimeout(requestTimer);
-    clearTimeout(pollTimer);
+    clearTimeout(timer);
+    clearTimeout(poll);
+    requestId = undefined;
+    view = undefined;
     refresh.disabled = true;
-    controlInput.disabled = true;
-    apply.disabled = true;
-    workspaceStatus.textContent = "状態不明";
-    workspaceIdentity.textContent = "接続切断のため対象情報を確認できません。";
-    showMessage(
+    links.disabled = true;
+    save.disabled = true;
+    status.textContent = "状態不明";
+    identity.textContent = "接続切断・対象情報は未確認";
+    linkStatus.textContent = "接続切断・関連先は未確認";
+    links.replaceChildren();
+    show(
       "Stream Deck との接続が切れました。アクションを選び直してください。",
       true,
     );
   });
   socket.addEventListener("error", () =>
-    showMessage("Stream Deck に接続できません。", true),
+    show("Stream Deck に接続できません。", true),
   );
 };

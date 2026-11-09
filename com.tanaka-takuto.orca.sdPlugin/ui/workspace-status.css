@@ -170,3 +170,30 @@ i {
   margin-top: 15px;
   font-size: 10px;
 }
+select {
+  width: 100%;
+  min-height: 36px;
+  font: inherit;
+  color: inherit;
+  background: #2b2f34;
+  border: 1px solid #50565e;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+select:focus-visible {
+  outline: 2px solid #69b4ff;
+  outline-offset: 2px;
+}
+.gestures {
+  padding-left: 18px;
+  line-height: 1.7;
+  color: #d2d8df;
+}
+.gestures li {
+  margin: 7px 0;
+}
+#link-status {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}

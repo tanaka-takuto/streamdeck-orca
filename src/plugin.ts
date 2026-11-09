@@ -10,6 +10,9 @@ import {
 } from "./actions/workspace-status";
 import { workspaceService } from "./workspace-service";
 
+streamDeck.devices.onDeviceDidDisconnect((ev) =>
+  workspaceService.status.disconnect(ev.device.id),
+);
 streamDeck.actions.registerAction(new WorkspaceStatusAction());
 streamDeck.actions.registerAction(new WorkspaceDialAction());
 streamDeck.actions.registerAction(new WorkspaceCommandAction());

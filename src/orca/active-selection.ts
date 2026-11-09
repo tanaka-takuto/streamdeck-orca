@@ -121,4 +121,23 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { object } from "./model";
+import { object, parseSnapshot } from "./model";
+
+/** Screen selection from worktree ps, independent of terminal/tab/AI selection. */
+export function parseWorkspaceSelection(state: unknown) {
+  const snapshot = parseSnapshot(state);
+  const rows = object(object(state).result).worktrees;
+  const active = (rows as unknown[]).filter(
+    (row) => object(row).isActive === true,
+  );
+  if (snapshot.truncated || snapshot.omittedHosts || active.length !== 1)
+    throw new Error("Orca の画面で選択中のWSを一つに確認できません。");
+  const id = object(active[0]).worktreeId;
+  const workspace = snapshot.workspaces.find((row) => row.id === id);
+  if (
+    workspace?.hostId !== "local" ||
+    snapshot.workspaces.filter((row) => row.id === id).length !== 1
+  )
+    throw new Error("選択中のローカルWSを確認できません。");
+  return { runtimeId: snapshot.runtimeId, workspace };
+}

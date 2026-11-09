@@ -67,7 +67,7 @@ function fixture(kind) {
     },
     save() {
       nodes
-        .get(kind === "status" ? "control-form" : "command-form")
+        .get(kind === "command" ? "command-form" : "control-form")
         .listeners.submit({ preventDefault() {} });
       return sent.findLast((m) => m.event === "setSettings").payload;
     },
@@ -108,7 +108,7 @@ function fixture(kind) {
   };
 }
 
-for (const kind of ["status", "command"]) {
+for (const kind of ["dial", "command"]) {
   test(`${kind}で同じ操作IDの設定保存中にも、古い応答からパスを復活させない`, () => {
     const f = fixture(kind);
     const oldRequestId = f.requestId;

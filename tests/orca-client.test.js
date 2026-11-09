@@ -152,3 +152,55 @@ test("ターミナル不在・終了済みでもワークスペース自体を�
     assert.deepEqual(activated, [{ id: "repo::/a", runtimeId: "runtime-a" }]);
   }
 });
+test("ボタンが確認したruntimeとWS実体から変化した場合は移動しない", async () => {
+  const calls = [];
+  const client = new OrcaClient(async (args) => {
+    calls.push(args);
+    return snapshot();
+  });
+  await assert.rejects(
+    client.focusWorkspace("repo::/a", () => true, undefined, "old-runtime"),
+    /実行環境/u,
+  );
+  await assert.rejects(
+    client.focusWorkspace(
+      "repo::/a",
+      () => true,
+      undefined,
+      "runtime-a",
+      "previous-instance",
+    ),
+    /再作成|実体/u,
+  );
+  assert.equal(
+    calls.every((args) => args[0] === "worktree"),
+    true,
+  );
+});
+test("長押しの画面選択はdesktop windowと同じruntimeの応答だけを採用", async () => {
+  const ps = snapshot();
+  ps.result.worktrees[0].isActive = true;
+  ps.result.worktrees[0].agents = [];
+  ps.result.worktrees[0].terminalVerdict = "none";
+  let available = false,
+    statusRuntime = "runtime-a";
+  const client = new OrcaClient(async (args) =>
+    args[0] === "status"
+      ? response(
+          {
+            app: {
+              running: true,
+              desktopWindowStatus: available ? "available" : "unavailable",
+            },
+          },
+          statusRuntime,
+        )
+      : ps,
+  );
+  await assert.rejects(client.selectedWorkspace(), /画面|ウィンドウ/u);
+  available = true;
+  statusRuntime = "other";
+  await assert.rejects(client.selectedWorkspace(), /実行環境/u);
+  statusRuntime = "runtime-a";
+  assert.equal((await client.selectedWorkspace()).workspace.id, "repo::/a");
+});

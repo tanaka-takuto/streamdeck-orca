@@ -3,41 +3,39 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Orca ワークスペース</title>
+    <title>Orca ワークスペースの状態</title>
     <link rel="stylesheet" href="workspace-status.css" />
     <script src="workspace-status.js" defer></script>
   </head>
   <body>
     <main>
       <p class="eyebrow">ORCA / WORKSPACE</p>
-      <h1 id="heading">ボタンとダイヤルをつなぐ</h1>
-      <p id="description" class="description">ボタンとダイヤルに同じ操作 ID を設定します。回転で全候補を、押し込みで次の入力待ちを選べます。</p>
-      <form id="control-form">
-        <label for="control-id">操作 ID</label>
-        <div class="control-row">
-          <input id="control-id" type="text" value="main" placeholder="例: main、左上、作業 A" autocomplete="off" disabled />
-          <button id="apply" type="submit" disabled>保存</button>
-        </div>
-      </form>
-      <p class="hint">同じ ID は同じ選択を共有します。別々に操作したい場合は ID を分けてください。</p>
-      <section class="selection" aria-label="現在の表示対象">
-        <p class="selection-label">現在のワークスペース</p>
+      <h1>このボタンのワークスペース</h1>
+      <p class="description">Orca で目的のWSを表示し、ボタンを700ms長押しすると登録できます。ファイル・ブラウザー・Chatを表示中でも使えます。</p>
+      <ul class="gestures">
+        <li><strong>短押し</strong>：登録したWSへ移動。指を離してから500ms待ちます。</li>
+        <li><strong>ダブル</strong>：指を離して500ms以内にもう一度押し、離すと関連Issue / PRを開きます。</li>
+        <li><strong>長押し</strong>：700msで画面選択WSを登録。二押目を長押しした場合も登録だけです。</li>
+      </ul>
+      <p class="hint">割当と関連先はこのボタン専用です。同じWSの他ボタン、ダイヤル、コマンドキーとは独立しています。長押し登録でWS移動やAI入力は行いません。</p>
+      <section class="selection" aria-label="このボタンの割当先">
+        <p class="selection-label">割当済みワークスペース</p>
         <p id="workspace-name">取得しています…</p>
-        <p id="workspace-identity" class="identity">対象情報を取得しています…</p>
+        <p id="workspace-identity" class="identity"></p>
         <p id="workspace-status"></p>
+      </section>
+      <section class="selection" aria-label="ダブルで開く関連先">
+        <label for="reference">ダブルで開く関連先</label>
+        <p id="link-status" role="status"></p>
+        <select id="reference" disabled></select>
+        <button id="save-reference" type="button" disabled>この関連先を保存</button>
+        <p class="hint">Orcaの選択中参照を優先します。指定がなければPR、次にIssue。同順位が複数ならここで選びます。消失した選択を別リンクへ振り替えません。</p>
       </section>
       <div class="connection">
         <p id="message" role="status" aria-live="polite">Stream Deck に接続しています…</p>
         <button id="refresh" type="button" disabled>状態を更新</button>
       </div>
-      <section class="legend" aria-label="キーの表示">
-        <span><i class="working"></i>進行中</span>
-        <span><i class="waiting"></i>入力待ち</span>
-        <span><i class="review"></i>返答あり・要確認</span>
-        <span><i class="idle"></i>待機</span>
-        <span><i class="unknown"></i>状態不明</span>
-      </section>
-      <p class="note">「返答あり」は AI の返答が終了した状態です。内容の確認や、文章で聞かれた質問への回答が残っている場合があります。</p>
+      <p class="note">状態は約2秒ごとに更新します。未割当ならOrcaでWSを選び、長押しで登録してください。対象消失・取得失敗では元の割当を残します。</p>
     </main>
   </body>
 </html>

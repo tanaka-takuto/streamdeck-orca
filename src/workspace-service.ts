@@ -11,8 +11,8 @@ import {
   WorkspaceExecutor,
 } from "./orca/execution";
 import { WorkspaceMonitor } from "./orca/monitor";
-import { updatePluginSettings } from "./plugin-settings";
-import { WorkspaceButtons, type WorkspaceKey } from "./workspace-buttons";
+import { type PluginSettings, updatePluginSettings } from "./plugin-settings";
+import type { WorkspaceKey } from "./workspace-buttons";
 import {
   ambiguousMessage,
   identityLine,
@@ -24,6 +24,7 @@ import {
   type SavedSelection,
   WorkspaceSelections,
 } from "./workspace-selections";
+import { WorkspaceStatusController } from "./workspace-status-controller";
 
 export type ControlSettings = { controlId?: string };
 type GlobalSettings = { workspaceSelections?: Record<string, SavedSelection> };
@@ -84,10 +85,23 @@ class WorkspaceService {
   private readonly client = new OrcaClient(this.runner);
   private readonly executor = new WorkspaceExecutor(this.client, this.runner);
   private readonly monitor = new WorkspaceMonitor(this.client);
-  private readonly buttons = new WorkspaceButtons(
+  private resolveLegacy!: (settings: PluginSettings | Error) => void;
+  private readonly legacySettings = new Promise<PluginSettings | Error>(
+    (resolve) => {
+      this.resolveLegacy = resolve;
+    },
+  );
+  readonly status = new WorkspaceStatusController(
     this.monitor,
     this.client,
+    async () => {
+      const result = await this.legacySettings;
+      if (result instanceof Error) throw result;
+      return result;
+    },
+    (url) => streamDeck.system.openUrl(url),
     (id, message) => this.report(id, message),
+    () => this.beginNavigation(),
   );
   private readonly selections = new WorkspaceSelections(
     this.monitor,
@@ -124,6 +138,7 @@ class WorkspaceService {
           );
         }),
       ]);
+      this.resolveLegacy(structuredClone(globalSettings));
       this.settingsReady = true;
       const saved = globalSettings.workspaceSelections;
       this.selections.hydrate(
@@ -132,6 +147,11 @@ class WorkspaceService {
           : {},
       );
     } catch (error) {
+      this.resolveLegacy(
+        new Error(
+          "旧割当の保存設定を取得できません。プラグインを再起動して移行をやり直してください。",
+        ),
+      );
       streamDeck.logger.warn(error);
       this.selections.hydrate({});
     } finally {
@@ -161,31 +181,6 @@ class WorkspaceService {
         .sendToPropertyInspector({ type: "error", actionId, message })
         .catch((error: unknown) => streamDeck.logger.error(error));
     }
-  }
-
-  bindKey(key: WorkspaceKey, controlId: string): void {
-    this.unbind(key.id);
-    const binding: Binding = {
-      controlId: normalizeControlId(controlId),
-      key,
-      renderVersion: 0,
-      queue: Promise.resolve(),
-    };
-    this.bindings.set(key.id, binding);
-    binding.stop = this.selections.subscribe(binding.controlId, (view) => {
-      const selected = JSON.stringify([view.workspaceId, view.workspaceName]);
-      if (
-        this.bindings.get(key.id) !== binding ||
-        binding.lastSelection === selected
-      )
-        return;
-      binding.lastSelection = selected;
-      this.buttons.bind(key, {
-        workspaceId: view.workspaceId,
-        workspaceName: view.workspaceName,
-        controlId: binding.controlId,
-      });
-    });
   }
 
   bindDial(dial: DialAction<ControlSettings>, controlId: string): void {
@@ -242,7 +237,6 @@ class WorkspaceService {
   unbind(actionId: string): void {
     const binding = this.bindings.get(actionId);
     this.bindings.delete(actionId);
-    this.buttons.unbind(actionId);
     this.attention.unbind(actionId);
     binding?.stop?.();
   }
@@ -597,67 +591,6 @@ class WorkspaceService {
     void next.then(cleanup, cleanup);
     return next;
   }
-  async press(actionId: string): Promise<void> {
-    const binding = this.bindings.get(actionId);
-    if (!binding) return;
-    const version = ++this.navigationVersion;
-    const selectionVersion = this.selectionVersions.get(binding.controlId) ?? 0;
-    const displayDeadline = Date.now() + 2_000;
-    const current = () =>
-      this.bindings.get(actionId) === binding &&
-      (this.selectionVersions.get(binding.controlId) ?? 0) ===
-        selectionVersion &&
-      this.navigationVersion === version;
-    try {
-      let waitedForSelection = false;
-      let pending = this.selectionUpdates.get(binding.controlId);
-      while (pending) {
-        waitedForSelection = true;
-        if (!(await settleDisplay(pending, displayDeadline - Date.now())))
-          throw new Error(
-            "選択とキーの表示を時間内に確認できません。表示を確認して、もう一度押してください。",
-          );
-        if (!(await pending))
-          throw new Error(
-            this.monitor.state.error ??
-              "ワークスペース一覧を更新できません。もう一度ダイヤルを操作してください。",
-          );
-        if (!current()) return;
-        pending = this.selectionUpdates.get(binding.controlId);
-      }
-      const workspaceId = this.selections.view(binding.controlId).workspaceId;
-      const targetCurrent = () =>
-        current() &&
-        !this.selectionUpdates.has(binding.controlId) &&
-        this.selections.view(binding.controlId).workspaceId === workspaceId;
-      if (
-        waitedForSelection &&
-        !(await this.buttons.waitForDisplay(
-          actionId,
-          targetCurrent,
-          displayDeadline - Date.now(),
-        ))
-      ) {
-        if (targetCurrent())
-          throw new Error(
-            "キーの表示を確認できません。表示を確認して、もう一度押してください。",
-          );
-        return;
-      }
-      if (targetCurrent()) await this.buttons.press(actionId, targetCurrent);
-    } catch (error) {
-      if (current()) {
-        this.report(
-          actionId,
-          error instanceof Error
-            ? error.message
-            : "ワークスペース一覧を更新できません。",
-        );
-        await binding.key?.showAlert();
-      }
-    }
-  }
-
   async sendView(actionId: string, requestId: string): Promise<void> {
     const binding = this.bindings.get(actionId);
     if (!binding) return;

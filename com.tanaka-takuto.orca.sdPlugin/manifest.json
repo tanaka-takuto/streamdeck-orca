@@ -95,7 +95,7 @@
       "Name": "ワークスペースの状態",
       "UUID": "com.tanaka-takuto.orca.workspace-status",
       "Icon": "imgs/action-icon",
-      "Tooltip": "同じ操作 ID のダイヤルでワークスペースを選び、キーを押すと開きます。",
+      "Tooltip": "短押しで割当WSへ移動（500ms待ち）。ダブルで関連Issue/PR、700ms長押しでOrcaの選択WSをこのボタンに登録。",
       "PropertyInspectorPath": "ui/workspace-status.html",
       "Controllers": ["Keypad"],
       "States": [
@@ -109,13 +109,13 @@
       "Name": "ワークスペース切り替え",
       "UUID": "com.tanaka-takuto.orca.workspace-dial",
       "Icon": "imgs/action-icon",
-      "Tooltip": "回転で全候補を選び、押し込みで次の入力待ちへ切り替えます。同じ操作 ID のキーに反映します。",
-      "PropertyInspectorPath": "ui/workspace-status.html",
+      "Tooltip": "回転で全候補を選び、押し込みで次の入力待ちへ切り替えます。同じ操作 ID のコマンドキー・レーダーに反映します。状態ボタンは独立です。",
+      "PropertyInspectorPath": "ui/workspace-dial.html",
       "Controllers": ["Encoder"],
       "Encoder": {
         "layout": "ui/workspace-dial.json",
         "TriggerDescription": {
-          "Rotate": "同じ操作 ID のキーのワークスペースを選ぶ",
+          "Rotate": "コマンドキー・レーダーの対象WSを選ぶ",
           "Push": "次の入力待ちワークスペースを選ぶ"
         }
       },
