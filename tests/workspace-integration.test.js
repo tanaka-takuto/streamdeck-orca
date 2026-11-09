@@ -18,9 +18,7 @@ import { WebSocketServer } from "ws";
 
 const device = "test-deck";
 const actions = {
-  radar: "com.tanaka-takuto.orca.change-radar",
   key: "com.tanaka-takuto.orca.workspace-status",
-  command: "com.tanaka-takuto.orca.workspace-command",
   active: "com.tanaka-takuto.orca.active-ai-input",
   attention: "com.tanaka-takuto.orca.attention",
 };
@@ -42,39 +40,6 @@ const info = {
     },
   ],
 };
-
-test("初期化後に追加したPR起動記録を後発のWS選択保存で消さない", async (t) => {
-  const record = {
-    status: "unknown",
-    operationId: "previous-operation",
-    accountId: 7,
-    pr: { repo: "acme/app", number: 12, sha: "a".repeat(40) },
-  };
-  const f = await fixture(t);
-  f.appear("bootstrap", "command", "main", { mode: "shell", body: "npm test" });
-  await f.wait(
-    (m) =>
-      m.event === "setGlobalSettings" &&
-      m.payload.workspaceSelections?.main?.workspaceId === "a",
-  );
-  f.setGlobalSettings({
-    ...f.settings,
-    prReviewLaunches: { previous: record },
-  });
-  const start = f.history.length;
-  f.appear("keep-record", "command", "later", {
-    mode: "shell",
-    body: "npm test",
-  });
-  await f.wait(
-    (m) =>
-      m.event === "setGlobalSettings" &&
-      m.payload.workspaceSelections?.later?.workspaceId === "a",
-    start,
-  );
-  assert.deepEqual(f.settings.prReviewLaunches, { previous: record });
-  assert.deepEqual(f.executions(), []);
-});
 
 test("専用キーは表示済み AI に入力し、保存や選択変更だけでは入力しない", {
   skip: process.platform === "win32",
@@ -328,7 +293,7 @@ else if (args[1] === 'list') {
     appear(context, kind, controlId, extra = {}) {
       actionSettings.set(context, { controlId, ...extra });
       this.send("willAppear", context, kind, {
-        controller: kind === "radar" ? "Encoder" : "Keypad",
+        controller: "Keypad",
         coordinates: { column: 0, row: 0 },
         isInMultiAction: false,
         settings: { controlId, ...extra },
@@ -405,7 +370,7 @@ const imageContains = (context, text) => (message) =>
   message.context === context &&
   decodeURIComponent(message.payload.image).includes(`>${text}</text>`);
 
-test("確認先キーだけで待ちと返答を一巡し、固定IDの宛先と件数を変えず送信しない", async (t) => {
+test("確認先キーだけで待ちと返答を一巡し、状態ボタンの旧割当と件数を変えず送信しない", async (t) => {
   const f = await fixture(t, {
     workspaceSelections: { main: { workspaceId: "b", workspaceName: "B" } },
   });
@@ -532,41 +497,6 @@ test("SDK の画像更新として進行中のアニメーションを送信す�
   assert.deepEqual(f.switches(), [], "アニメーションで画面を移動しない");
 });
 
-test("状態ボタンの移行と長押し再割当で既存コマンドキーの対象を変えない", async (t) => {
-  const f = await fixture(t, {
-    workspaceSelections: { main: { workspaceId: "a", workspaceName: "A" } },
-  });
-  f.appear("key-main", "key", "main");
-  f.appear("run", "command", "main", {
-    mode: "shell",
-    body: "npm test",
-    label: "テスト",
-  });
-  await f.wait((m) => m.event === "setSettings" && m.context === "key-main");
-  await f.wait(imageContains("key-main", "A"));
-  await f.wait(imageContains("run", "A"));
-  const snap = snapshot(["a", "b"]);
-  snap.result.worktrees[1].isActive = true;
-  f.setSnapshot(snap);
-  f.send("keyDown", "key-main", "key");
-  await f.wait((m) => m.event === "showOk" && m.context === "key-main");
-  f.send("keyUp", "key-main", "key");
-  f.send("keyDown", "run", "command");
-  await f.wait((m) => m.event === "showOk" && m.context === "run");
-  assert.equal(
-    f.executions()[0][f.executions()[0].indexOf("--worktree") + 1],
-    "id:a",
-  );
-  f.send("keyDown", "key-main", "key");
-  f.send("keyUp", "key-main", "key");
-  const deadline = Date.now() + 5000;
-  while (!f.switches().length && Date.now() < deadline)
-    await new Promise((r) => setTimeout(r, 20));
-  assert.deepEqual(f.switches(), [
-    ["terminal", "switch", "--terminal", "fresh-b", "--json"],
-  ]);
-});
-
 test("未割当ボタンは先頭WSを選ばずkeyDownだけでは移動しない", async (t) => {
   const f = await fixture(t);
   f.appear("blank", "key", undefined, { workspaceButtonVersion: 1 });
@@ -615,139 +545,4 @@ test("SDK長押しはAIなしの画面選択WSを登録し移動せず他ボタ�
   assert.equal(view.payload.workspace.workspaceId, "a");
   assert.deepEqual(f.switches(), []);
   assert.deepEqual(f.executions(), []);
-});
-
-test("ダイヤルがなくても保存済み対象で一度だけコマンドを実行し、設定だけでは実行しない", async (t) => {
-  const f = await fixture(t, {
-    workspaceSelections: { main: { workspaceId: "b", workspaceName: "B" } },
-  });
-  f.appear("run", "command", "main", {
-    mode: "shell",
-    body: "npm test",
-    label: "テスト",
-  });
-  await f.wait(imageContains("run", "B"));
-  assert.deepEqual(f.executions(), []);
-  f.send("keyDown", "run", "command");
-  f.send("keyDown", "run", "command");
-  await f.wait((m) => m.event === "showOk" && m.context === "run");
-  assert.deepEqual(f.executions(), [
-    [
-      "terminal",
-      "create",
-      "--worktree",
-      "id:b",
-      "--title",
-      "テスト",
-      "--command",
-      "npm test",
-      "--focus",
-      "--json",
-    ],
-  ]);
-  await f.wait(imageContains("run", "B"));
-});
-
-test("AI ボタンで指示を送り、古いプロセスを指定した設定では再送しない", async (t) => {
-  const f = await fixture(t);
-  f.appear("run", "command", "main", {
-    mode: "ai",
-    body: "変更をレビューして",
-  });
-  await f.wait(imageContains("run", "A"));
-  f.send("keyDown", "run", "command");
-  await f.wait((m) => m.event === "showOk" && m.context === "run");
-  assert.deepEqual(f.executions(), [
-    [
-      "terminal",
-      "send",
-      "--terminal",
-      "fresh-a",
-      "--text",
-      "変更をレビューして",
-      "--enter",
-      "--json",
-    ],
-  ]);
-  const start = f.history.length;
-  f.send("didReceiveSettings", "run", "command", {
-    settings: {
-      controlId: "main",
-      mode: "ai",
-      body: "変更をレビューして",
-      agentTargets: {
-        a: {
-          handle: "fresh-a",
-          runtimeId: "test-runtime",
-          incarnationId: "old",
-        },
-      },
-    },
-  });
-  f.send("keyDown", "run", "command");
-  await f.wait((m) => m.event === "showAlert" && m.context === "run", start);
-  assert.equal(f.executions().length, 1);
-});
-
-test("実GitとSDKのレーダー押下/タップから両WSのコード行へ移動する", async (t) => {
-  const f = await fixture(t),
-    a = join(f.directory, "git-a"),
-    b = join(f.directory, "git-b");
-  mkdirSync(a);
-  const git = (cwd, ...args) =>
-    execFileSync(
-      "git",
-      [
-        "-c",
-        "user.name=SDK Test",
-        "-c",
-        "user.email=sdk@example.test",
-        ...args,
-      ],
-      { cwd, stdio: ["ignore", "pipe", "pipe"] },
-    );
-  git(a, "init", "-b", "main");
-  writeFileSync(join(a, "shared.txt"), "one\ntwo\nthree\n");
-  git(a, "add", ".");
-  git(a, "commit", "-m", "base");
-  git(a, "worktree", "add", "-b", "peer", b);
-  writeFileSync(join(a, "shared.txt"), "one\nleft\nthree\n");
-  writeFileSync(join(b, "shared.txt"), "one\nright\nthree\n");
-  const data = snapshot(["a", "b"]);
-  data.result.worktrees[0].path = a;
-  data.result.worktrees[1].path = b;
-  f.setSnapshot(data);
-  f.appear("radar", "radar", "main");
-  await f.wait(
-    (m) =>
-      m.event === "setFeedback" &&
-      m.context === "radar" &&
-      m.payload.title.includes("同じ行域"),
-  );
-  const afterOpen = f.history.length;
-  f.send("dialDown", "radar", "radar");
-  await f.wait(
-    (m) =>
-      m.event === "setFeedback" &&
-      m.context === "radar" &&
-      m.payload.operation === "押:自コード / 触:相コード" &&
-      f.executions().length === 1,
-    afterOpen,
-  );
-  f.send("touchTap", "radar", "radar", { hold: false, tapPos: [20, 20] });
-  await f.wait(
-    (m) =>
-      m.event === "setFeedback" &&
-      m.context === "radar" &&
-      f.executions().length === 2,
-  );
-  const calls = f.executions();
-  assert.equal(calls[0][calls[0].indexOf("--worktree") + 1], "id:a");
-  assert.equal(calls[1][calls[1].indexOf("--worktree") + 1], "id:b");
-  assert.ok(
-    calls.every(
-      (x) =>
-        x.includes("--path=shared.txt") && x[x.indexOf("--line") + 1] === "2",
-    ),
-  );
 });

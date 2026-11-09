@@ -8,11 +8,17 @@ import {
   type ActiveSelectionReader,
   createActiveSelectionReader,
 } from "./active-selection";
+import { AgentDirectoryReader, type AgentTarget } from "./agent-directory";
 import type { CliRunner, OrcaClient } from "./client";
-import type { AgentTarget } from "./execution";
-import { type ExecutionResult, WorkspaceExecutor } from "./execution";
 import type { OrcaWorkspace } from "./model";
 import { object, readResponse } from "./model";
+
+export type InputResult = {
+  status: "accepted" | "refused" | "unknown" | "cancelled";
+  message: string;
+  handle?: string;
+  requestId?: string;
+};
 
 export type ActiveInputSettings = {
   body?: string;
@@ -46,13 +52,13 @@ export const recipientSignature = (r: ActiveRecipient) =>
     r.target.name,
   ]);
 export class ActiveAiInput {
-  private readonly executor: WorkspaceExecutor;
+  private readonly executor: AgentDirectoryReader;
   constructor(
     client: Pick<OrcaClient, "snapshot">,
     private readonly run: CliRunner,
     private readonly readActive: ActiveSelectionReader = createActiveSelectionReader(),
   ) {
-    this.executor = new WorkspaceExecutor(client, run);
+    this.executor = new AgentDirectoryReader(client, run);
   }
 
   async resolve() {
@@ -113,8 +119,8 @@ export class ActiveAiInput {
     settings: ActiveInputSettings,
     displayed: ActiveRecipient,
     isCurrent = () => true,
-  ): Promise<ExecutionResult> {
-    const cancelled: ExecutionResult = {
+  ): Promise<InputResult> {
+    const cancelled: InputResult = {
       status: "cancelled",
       message: "選択や設定が変わったため入力していません。",
     };

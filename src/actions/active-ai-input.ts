@@ -13,10 +13,10 @@ import {
   ActiveAiInput,
   type ActiveInputSettings,
   type ActiveRecipient,
+  type InputResult,
   recipientSignature,
 } from "../orca/active-input";
 import { createCliRunner, OrcaClient } from "../orca/client";
-import type { ExecutionResult } from "../orca/execution";
 import { RecipientMonitor } from "../orca/recipient-monitor";
 import type { WorkspaceKey } from "../workspace-buttons";
 
@@ -28,7 +28,7 @@ type Receipt = {
   enter: boolean;
   fingerprint: string;
   recipient?: ActiveRecipient;
-  result: ExecutionResult;
+  result: InputResult;
 };
 type Binding = {
   key: WorkspaceKey;
@@ -156,7 +156,7 @@ export class ActiveAiInputAction extends SingletonAction<Settings> {
     const at = new Date().toISOString();
     const intent = this.shown.get(id) ?? { settings: b.settings },
       settings = b.settings;
-    const record = (result: ExecutionResult) =>
+    const record = (result: InputResult) =>
       this.results.set(id, {
         at,
         label: intent.settings.label || "定型文",
@@ -202,7 +202,7 @@ export class ActiveAiInputAction extends SingletonAction<Settings> {
         recipientSignature(recipient) &&
       b.displayed !== undefined &&
       signature(b.displayed) === expected;
-    let result: ExecutionResult;
+    let result: InputResult;
     try {
       result = await this.input.send(settings, recipient, current);
     } catch (error) {

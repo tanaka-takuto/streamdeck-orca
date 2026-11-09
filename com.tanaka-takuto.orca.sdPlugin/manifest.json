@@ -3,7 +3,7 @@
   "Name": "Orca",
   "Version": "0.8.0.0",
   "Author": "tanaka-takuto",
-  "Description": "Orca のワークスペース状態の表示・切り替え、シェルコマンドの実行、AIへの指示送信を行います。",
+  "Description": "Orca のワークスペース状態と確認先の表示、WSへの移動、表示AIへの入力、レビュー依頼PRからのAI起動を行います。",
   "UUID": "com.tanaka-takuto.orca",
   "Category": "Orca",
   "CategoryIcon": "imgs/category-icon",
@@ -78,48 +78,12 @@
       ]
     },
     {
-      "Name": "コマンド・AI指示",
-      "UUID": "com.tanaka-takuto.orca.workspace-command",
-      "Icon": "imgs/action-icon",
-      "Tooltip": "選択したワークスペースでコマンドを実行、または指定した AI へ指示を送ります。",
-      "PropertyInspectorPath": "ui/workspace-command.html",
-      "Controllers": ["Keypad"],
-      "States": [
-        {
-          "Image": "imgs/key",
-          "ShowTitle": false
-        }
-      ]
-    },
-    {
       "Name": "ワークスペースの状態",
       "UUID": "com.tanaka-takuto.orca.workspace-status",
       "Icon": "imgs/action-icon",
       "Tooltip": "短押しで割当WSへ移動（500ms待ち）。ダブルで関連Issue/PR、700ms長押しでOrcaの選択WSをこのボタンに登録。",
       "PropertyInspectorPath": "ui/workspace-status.html",
       "Controllers": ["Keypad"],
-      "States": [
-        {
-          "Image": "imgs/key",
-          "ShowTitle": false
-        }
-      ]
-    },
-    {
-      "Name": "並列変更レーダー",
-      "UUID": "com.tanaka-takuto.orca.change-radar",
-      "Icon": "imgs/action-icon",
-      "Tooltip": "別ワークスペースと共通する変更箇所を探し、双方のコードへ移動します。",
-      "PropertyInspectorPath": "ui/change-radar.html",
-      "Controllers": ["Encoder"],
-      "Encoder": {
-        "layout": "ui/change-radar.json",
-        "TriggerDescription": {
-          "Rotate": "接点を選ぶ",
-          "Push": "自分側のコードを開く",
-          "Touch": "相手側のコードを開く"
-        }
-      },
       "States": [
         {
           "Image": "imgs/key",
