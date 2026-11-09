@@ -8,6 +8,7 @@ import type {
 import {
   normalizeOldestReviewSettings,
   type ReviewSettings,
+  reviewAgentLabel,
 } from "./pr-review-settings";
 import type { WorkspaceKey } from "./workspace-buttons";
 import { workspaceTag } from "./workspace-identity";
@@ -53,7 +54,7 @@ export function oldestReviewImage(data: {
     34,
     Math.floor(124 / (Math.max(1, label.length - 1) * 0.62 + 1)),
   );
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="16" fill="${data.error ? "#633449" : data.count === 0 ? "#374151" : "#145c9e"}"/><g fill="#fff" font-family="-apple-system,sans-serif" text-anchor="middle">${svgText("レビュー待ち", 20, 14)}${svgText(label, 59, size)}${svgText(lines[0], 79, 12)}${svgText(lines[1], 94, 12)}${svgText(data.pr ? `#${data.pr.number} · ${workspaceTag(data.pr.repo.toLowerCase())}` : "", 108, 12)}${svgText(`${data.agent === "claude" ? "Claude" : "Codex"} · ${handoffLabel(data.handoff)}`, 123, 11)}${svgText(data.phase, 139, 11)}</g></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="16" fill="${data.error ? "#633449" : data.count === 0 ? "#374151" : "#145c9e"}"/><g fill="#fff" font-family="-apple-system,sans-serif" text-anchor="middle">${svgText("レビュー待ち", 20, 14)}${svgText(label, 59, size)}${svgText(lines[0], 79, 12)}${svgText(lines[1], 94, 12)}${svgText(data.pr ? `#${data.pr.number} · ${workspaceTag(data.pr.repo.toLowerCase())}` : "", 108, 12)}${svgText(`${reviewAgentLabel(data.agent)} · ${handoffLabel(data.handoff)}`, 123, 11)}${svgText(data.phase, 139, 11)}</g></svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 /** One personal queue. A rendered target must survive a fresh oldest-first lookup. */

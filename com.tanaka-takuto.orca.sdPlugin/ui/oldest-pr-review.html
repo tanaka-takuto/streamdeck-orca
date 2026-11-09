@@ -6,7 +6,8 @@
 <h1>最古のレビュー依頼</h1>
 <p class="description">自分に直接届いたレビュー依頼を、更新日時が古い順に扱います。ボタンに件数と次のPRを表示し、押すと対象ブランチのWSでAIを起動します。</p>
 <form id="review-form">
-<label for="agent">起動するAI</label><select id="agent" disabled><option value="codex">Codex</option><option value="claude">Claude Code</option></select>
+<label for="agent">起動するAI</label><select id="agent" disabled><option value="default">Orcaのデフォルト</option><option value="codex">Codex</option><option value="claude">Claude Code</option></select>
+<p class="hint">Orcaのデフォルトは押す時点のOrca設定を使います。未設定・通常ターミナル・無効なAIの場合は起動しません。</p>
 <label for="handoff">AIへの渡し方</label><select id="handoff" disabled><option value="none">AIを起動するだけ</option><option value="draft">本文を下書きとして入力する</option><option value="send">本文を入力して送信する</option></select>
 <label for="body">AIに渡す本文</label><textarea id="body" rows="7" maxlength="16000" disabled></textarea>
 <p id="handoff-help" class="hint"></p>

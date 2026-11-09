@@ -17,7 +17,8 @@
       <label for="review-mode">レビュー依頼の種類</label>
       <select id="review-mode" disabled><option value="personal">自分への直接の依頼</option><option value="team">自分の所属チームへの依頼</option></select>
       <label for="agent">起動するAI</label>
-      <select id="agent" disabled><option value="codex">Codex</option><option value="claude">Claude Code</option></select>
+      <select id="agent" disabled><option value="default">Orcaのデフォルト</option><option value="codex">Codex</option><option value="claude">Claude Code</option></select>
+      <p class="hint">Orcaのデフォルトは押す時点のOrca設定を使います。未設定・通常ターミナル・無効なAIの場合は起動しません。</p>
       <label for="body">AIに渡すテキスト</label>
       <textarea id="body" rows="7" maxlength="16000" disabled></textarea>
       <p class="hint">PRのURLは {{PR_LINK}}（{{pr_url}} も使用可）、番号は {{pr_number}}、リポジトリは {{repo}}、対象ブランチは {{branch}}、コミットは {{head_sha}}、比較先は {{base_branch}} で挿入できます。</p>

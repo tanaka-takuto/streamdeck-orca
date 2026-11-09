@@ -3,7 +3,8 @@ import test from "node:test";
 import { loadModule } from "./helpers/load-module.js";
 
 const { ReviewLauncher } = await loadModule("src/orca/review-launcher.ts");
-const { reviewPrompt } = await loadModule("src/pr-review-settings.ts");
+const { reviewPrompt, normalizeReviewSettings, normalizeOldestReviewSettings } =
+  await loadModule("src/pr-review-settings.ts");
 const pr = {
   repo: "acme/app",
   number: 12,
@@ -77,6 +78,10 @@ function fixture({
     },
     rpc: async (method, params) => {
       calls.push([method, params]);
+      if (method === "settings.getAgentLaunch")
+        return env({
+          settings: { defaultTuiAgent: "codex", disabledTuiAgents: [] },
+        });
       if (method === "worktree.create") {
         exists = true;
         return env({ worktree: ws });
@@ -102,6 +107,127 @@ function fixture({
   };
   return { launcher: new ReviewLauncher(deps), calls, records, detail, deps };
 }
+test("両PRアクションはOrca既定を初期値にし、明示したAIを保持する", () => {
+  for (const normalize of [
+    normalizeReviewSettings,
+    normalizeOldestReviewSettings,
+  ]) {
+    assert.equal(normalize({}).agent, "default");
+    for (const agent of ["default", "codex", "claude"])
+      assert.equal(normalize({ agent }).agent, agent);
+  }
+});
+test("Orca既定は起動時に取得したAIを使い、起動直前にも再照合する", async () => {
+  const f = fixture();
+  const original = f.deps.rpc;
+  let reads = 0;
+  f.deps.rpc = async (method, ...args) => {
+    if (method === "settings.getAgentLaunch") {
+      ++reads;
+      return env({
+        settings: { defaultTuiAgent: "omp", disabledTuiAgents: [] },
+      });
+    }
+    return original(method, ...args);
+  };
+  const result = await f.launcher.launch(pr, 7, {
+    agent: "default",
+    body: "review",
+  });
+  assert.equal(result.status, "accepted");
+  assert.equal(reads, 2);
+  assert.equal(
+    f.calls.find(([name]) => name === "agent.launchReplay")[1].agent,
+    "omp",
+  );
+});
+test("明示したCodex・ClaudeではOrca既定を読まず、指定をそのまま使う", async () => {
+  for (const agent of ["codex", "claude"]) {
+    const f = fixture();
+    await f.launcher.launch(pr, 7, { agent, body: "review" });
+    assert.equal(
+      f.calls.find(([name]) => name === "agent.launchReplay")[1].agent,
+      agent,
+    );
+    assert.ok(!f.calls.some(([name]) => name === "settings.getAgentLaunch"));
+  }
+});
+test("Orca既定の未設定・通常端末・無効化・不正値・取得失敗ではAIを起動しない", async () => {
+  for (const value of [
+    null,
+    "blank",
+    "",
+    "codex;echo",
+    { id: "codex" },
+    "disabled",
+    "unavailable",
+    "runtime-change",
+  ]) {
+    const f = fixture();
+    const original = f.deps.rpc;
+    f.deps.rpc = async (method, ...args) => {
+      if (method !== "settings.getAgentLaunch")
+        return original(method, ...args);
+      if (value === "unavailable") throw new Error("connection failed");
+      const response = env({
+        settings: {
+          defaultTuiAgent: value === "disabled" ? "codex" : value,
+          disabledTuiAgents: value === "disabled" ? ["codex"] : [],
+        },
+      });
+      if (value === "runtime-change") response._meta.runtimeId = "other";
+      return response;
+    };
+    await assert.rejects(
+      f.launcher.launch(pr, 7, { agent: "default", body: "review" }),
+      /既定|デフォルト|実行環境/u,
+    );
+    assert.ok(
+      !f.calls.some(
+        ([name]) => name === "agent.launchReplay" || name === "worktree.create",
+      ),
+    );
+    assert.equal(Object.values(f.records).filter(Boolean).length, 0);
+  }
+});
+test("準備中にOrca既定が変われば別AIへ差し替えず起動を中止する", async () => {
+  const f = fixture();
+  const original = f.deps.rpc;
+  let reads = 0;
+  f.deps.rpc = async (method, ...args) =>
+    method === "settings.getAgentLaunch"
+      ? env({
+          settings: {
+            defaultTuiAgent: ++reads === 1 ? "codex" : "omp",
+            disabledTuiAgents: [],
+          },
+        })
+      : original(method, ...args);
+  await assert.rejects(
+    f.launcher.launch(pr, 7, { agent: "default", body: "review" }),
+    /既定|デフォルト/u,
+  );
+  assert.ok(!f.calls.some(([name]) => name === "agent.launchReplay"));
+});
+test("起動済みPRの再押下はOrca既定を取得できなくてもWSだけを開く", async () => {
+  const f = fixture();
+  await f.launcher.launch(pr, 7, { agent: "codex", body: "review" });
+  f.deps.rpc = async () => {
+    throw new Error("既定AIを取得できません");
+  };
+  const result = await f.launcher.launch(
+    pr,
+    7,
+    { agent: "default", body: "review" },
+    () => true,
+    "asc",
+  );
+  assert.equal(result.status, "opened");
+  assert.equal(
+    f.calls.filter(([name]) => name === "agent.launchReplay").length,
+    1,
+  );
+});
 test("既存の対象ブランチWSを再利用して新規AIへ複数行をdraftで渡す", async () => {
   const f = fixture();
   const r = await f.launcher.launch(pr, 7, {
@@ -225,7 +351,9 @@ test("PR_LINKエイリアスを空白付きでも一度だけ展開する", () =
 });
 test("起動だけでは空本文を許容してpromptを一切渡さず、再押下で重複起動しない", async () => {
   const f = fixture();
+  const original = f.deps.rpc;
   f.deps.rpc = async (method, params) => {
+    if (method === "settings.getAgentLaunch") return original(method, params);
     f.calls.push([method, params]);
     return env({
       worktreeId: "repo::/ws",

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-function fixture() {
+function fixture(initial = { body: "review", enter: false }) {
   const html = readFileSync(
     "com.tanaka-takuto.orca.sdPlugin/ui/pr-review.html",
     "utf8",
@@ -64,7 +64,7 @@ function fixture() {
     JSON.stringify({
       context: "dial",
       action: "review",
-      payload: { settings: { body: "review", enter: false } },
+      payload: { settings: initial },
     }),
   );
   socket.listeners.open();
@@ -122,6 +122,21 @@ function fixture() {
     },
   };
 }
+test("起動するAIはOrca既定を初期値にし、明示した設定と追加フィールドを保存時に保持する", () => {
+  assert.match(
+    readFileSync("com.tanaka-takuto.orca.sdPlugin/ui/pr-review.html", "utf8"),
+    /value="default"/u,
+  );
+  const fresh = fixture();
+  assert.equal(fresh.nodes.get("agent").value, "default");
+  for (const agent of ["default", "codex", "claude"]) {
+    const f = fixture({ agent, body: "review", custom: "keep" });
+    assert.equal(f.nodes.get("agent").value, agent);
+    const saved = f.save();
+    assert.equal(saved.agent, agent);
+    assert.equal(saved.custom, "keep");
+  }
+});
 test("保存はEnter設定を保持し、AIを起動しない", () => {
   const f = fixture();
   f.nodes.get("enter").checked = true;

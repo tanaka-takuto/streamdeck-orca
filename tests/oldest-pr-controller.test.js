@@ -103,6 +103,7 @@ test("全件数と最古PRを表示し個人宛てascで検索、再押下でも
   await f.bind(k, { reviewMode: "team" });
   assert.match(f.images.at(-1).image, />120<|120件/u);
   assert.match(f.images.at(-1).image, /#1/u);
+  assert.match(f.images.at(-1).image, /Orca既定/u);
   assert.deepEqual(f.queries[0], ["personal", undefined, "asc"]);
   await f.c.press(k.id);
   await tick();

@@ -115,6 +115,17 @@ function fixture(initial = {}) {
     },
   };
 }
+test("Orca既定を初期値として保存でき、明示したAI設定も保持する", () => {
+  assert.match(readFileSync(`${base}.html`, "utf8"), /value="default"/u);
+  assert.equal(fixture().nodes.get("agent").value, "default");
+  for (const agent of ["default", "codex", "claude"]) {
+    const f = fixture({ agent, custom: "keep" });
+    assert.equal(f.nodes.get("agent").value, agent);
+    const saved = f.save();
+    assert.equal(saved.agent, agent);
+    assert.equal(saved.custom, "keep");
+  }
+});
 test("起動だけは空本文で保存でき、送信モードの空本文は保存しない", () => {
   const f = fixture({ custom: "keep", body: "" });
   assert.equal(f.nodes.get("body").disabled, true);

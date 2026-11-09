@@ -24,6 +24,7 @@ test("SDKのPRダイヤルと最古PRボタンが起動記録を共有し、入�
     activations = [],
     messages = [],
     sockets = new Set();
+  let defaultAgent = "codex";
   const envelope = (result) => ({
     ok: true,
     _meta: { runtimeId: "runtime" },
@@ -38,6 +39,12 @@ test("SDKのPRダイヤルと最古PRボタンが起動記録を共有し、入�
       if (!pending.includes("\n")) return;
       const request = JSON.parse(pending.split("\n")[0]);
       assert.equal(request.authToken, "test-only-token");
+      if (request.method === "settings.getAgentLaunch") {
+        socket.write(
+          `${JSON.stringify({ id: request.id, ...envelope({ settings: { defaultTuiAgent: defaultAgent, disabledTuiAgents: [] } }) })}\n`,
+        );
+        return;
+      }
       if (request.method === "worktree.activate") {
         activations.push(request.params.worktree);
         socket.write(
@@ -234,6 +241,7 @@ console.log(JSON.stringify({ok:true,_meta:{runtimeId:'runtime'},result}));`,
     ),
   );
   assert.equal(launches.length, 1);
+  assert.equal(launches[0].agent, "codex");
   assert.equal(launches[0].target.worktree, "id:repo::/fake/pr2");
   assert.deepEqual(launches[0].prompt, {
     text: "Review\nhttps://github.com/acme/app/pull/2",
@@ -303,12 +311,14 @@ console.log(JSON.stringify({ok:true,_meta:{runtimeId:'runtime'},result}));`,
   sendButton("keyDown");
   await wait(() => image().includes("WSを開きました"));
   assert.equal(launches.length, 3);
+  defaultAgent = "omp";
   writeFileSync(listPath, JSON.stringify([4]));
   sendButton("didReceiveSettings", { settings: { handoff: "none", body: "" } });
   await wait(() => image().includes("#4") && image().includes("AI起動のみ"));
   sendButton("keyDown");
   await wait(() => launches.length === 4 && image().includes("起動受付済み"));
   assert.equal("prompt" in launches[3], false);
+  assert.equal(launches[3].agent, "omp");
   assert.deepEqual(settings.workspaceSelections, {
     legacy: { workspaceId: "keep", workspaceName: "Keep" },
   });

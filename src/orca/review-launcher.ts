@@ -68,6 +68,38 @@ export class ReviewLauncher {
       throw new Error("Orcaの実行環境が変わりました。起動していません。");
     return result;
   }
+  private async defaultAgent(runtimeId: string): Promise<string> {
+    let settings: Record<string, unknown>;
+    try {
+      settings = object(
+        this.response(
+          await this.deps.rpc("settings.getAgentLaunch", {}, runtimeId),
+          runtimeId,
+        ).result.settings,
+      );
+    } catch (error) {
+      throw new Error(
+        `OrcaのデフォルトAIを取得できません。${error instanceof Error ? error.message : "Orcaの接続を確認してください。"}`,
+      );
+    }
+    const agent = settings.defaultTuiAgent;
+    if (agent === null || agent === "blank")
+      throw new Error(
+        "OrcaのデフォルトAIが未設定、または通常ターミナルです。Orcaの設定でAIを選んでください。",
+      );
+    if (
+      typeof agent !== "string" ||
+      !/^[a-z][a-z0-9-]{0,63}$/u.test(agent) ||
+      !Array.isArray(settings.disabledTuiAgents) ||
+      !settings.disabledTuiAgents.every((id) => typeof id === "string")
+    )
+      throw new Error("OrcaのデフォルトAIの設定を確認できません。");
+    if (settings.disabledTuiAgents.includes(agent))
+      throw new Error(
+        "OrcaのデフォルトAIが無効です。Orcaの設定で有効なAIを選んでください。",
+      );
+    return agent;
+  }
   private async repo(
     pr: ReviewPR,
     runtimeId: string,
@@ -264,6 +296,10 @@ export class ReviewLauncher {
         throw new Error(
           "この機能にはAI起動・下書き対応のOrcaが必要です。Orcaを更新してください。",
         );
+      const agent =
+        settings.agent === "default"
+          ? await this.defaultAgent(runtimeId)
+          : settings.agent;
       if (!isCurrent())
         return {
           status: "cancelled",
@@ -425,6 +461,13 @@ export class ReviewLauncher {
         );
       record.message = "AIの起動結果を待っています。";
       await this.deps.saveRecord(key, record);
+      if (
+        settings.agent === "default" &&
+        (await this.defaultAgent(runtimeId)) !== agent
+      )
+        throw new Error(
+          "OrcaのデフォルトAIが変わりました。起動していません。表示を確認して押し直してください。",
+        );
       if (!isCurrent())
         throw new Error(
           "選択や設定が変わったため中止しました。AIは起動していません。",
@@ -435,7 +478,7 @@ export class ReviewLauncher {
           "agent.launchReplay",
           {
             operationId: record.operationId,
-            agent: settings.agent,
+            agent,
             target: { kind: "existing", worktree: `id:${ws.id}` },
             ...(text === undefined
               ? {}

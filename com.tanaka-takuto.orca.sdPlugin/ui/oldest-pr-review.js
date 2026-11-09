@@ -26,7 +26,7 @@ let socket,
   saveTimer,
   lastView;
 const fields = (s) => ({
-  agent: s.agent === "claude" ? "claude" : "codex",
+  agent: s.agent === "codex" || s.agent === "claude" ? s.agent : "default",
   handoff: s.handoff === "draft" || s.handoff === "send" ? s.handoff : "none",
   body: typeof s.body === "string" ? s.body : defaultBody,
 });

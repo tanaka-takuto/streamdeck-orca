@@ -1,7 +1,7 @@
 import type { ReviewDetail, ReviewMode } from "./github/reviews";
 export type ReviewSettings = {
   reviewMode?: ReviewMode;
-  agent?: "codex" | "claude";
+  agent?: "default" | "codex" | "claude";
   body?: string;
   enter?: boolean;
   handoff?: "none" | "draft" | "send";
@@ -13,11 +13,17 @@ export function normalizeReviewSettings(s: ReviewSettings) {
   return {
     reviewMode:
       s.reviewMode === "team" ? ("team" as const) : ("personal" as const),
-    agent: s.agent === "claude" ? ("claude" as const) : ("codex" as const),
+    agent:
+      s.agent === "codex" || s.agent === "claude"
+        ? s.agent
+        : ("default" as const),
     body: typeof s.body === "string" ? s.body : defaultReviewBody,
     enter: s.enter === true,
   };
 }
+
+export const reviewAgentLabel = (agent?: string) =>
+  agent === "claude" ? "Claude" : agent === "codex" ? "Codex" : "Orca既定";
 export function reviewPrompt(body: string, pr: ReviewDetail): string {
   const values: Record<string, string> = {
     PR_LINK: pr.url,

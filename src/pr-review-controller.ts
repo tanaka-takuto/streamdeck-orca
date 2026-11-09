@@ -13,6 +13,7 @@ import type {
 import {
   normalizeReviewSettings,
   type ReviewSettings,
+  reviewAgentLabel,
 } from "./pr-review-settings";
 import { workspaceTag } from "./workspace-identity";
 export type ReviewDial = {
@@ -161,7 +162,7 @@ export class PRReviewController {
       pr: pr ? `#${pr.number} · ${workspaceTag(pr.repo.toLowerCase())}` : "",
       title,
       title2,
-      input: `${b.settings.agent === "claude" ? "Claude" : "Codex"} · ${b.settings.enter ? "入力＋Enter" : "入力のみ"}`,
+      input: `${reviewAgentLabel(b.settings.agent)} · ${b.settings.enter ? "入力＋Enter" : "入力のみ"}`,
       operation: b.busy
         ? "連打せずお待ちください"
         : b.result?.status === "unknown"

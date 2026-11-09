@@ -49,6 +49,7 @@ async function fixture(t) {
   c.bind(dial, { enter: false });
   await tick();
   await tick();
+  assert.match(visible.input, /Orca既定/u);
   t.after(() => {
     c.unbind(dial.id);
     release?.();

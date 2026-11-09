@@ -40,7 +40,7 @@ const send = (event, payload) => {
 function fields(s) {
   return {
     reviewMode: s.reviewMode === "team" ? "team" : "personal",
-    agent: s.agent === "claude" ? "claude" : "codex",
+    agent: s.agent === "codex" || s.agent === "claude" ? s.agent : "default",
     body: typeof s.body === "string" ? s.body : defaultBody,
     enter: s.enter === true,
   };
