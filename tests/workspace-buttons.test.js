@@ -63,7 +63,7 @@ test("選択したワークスペースの入力待ちをキー画像に表示�
   assert.match(f.images.at(-1), /作業 A/u);
 });
 
-test("実一覧からキーへプロジェクトと短タグを渡し、対象消失でプロジェクトを取得済みとしない", async () => {
+test("実一覧からプロジェクトを表示し、対象消失では取得済みとせず短タグも表示しない", async () => {
   const f = fixture();
   f.buttons.bind(f.key, { workspaceId: "a", workspaceName: "main" });
   f.emit(
@@ -72,11 +72,11 @@ test("実一覧からキーへプロジェクトと短タグを渡し、対象�
   await tick();
   assert.match(f.images.at(-1), /sateto/u);
   const { workspaceTag } = await loadModule("src/attention-image.ts");
-  assert.ok(f.images.at(-1).includes(workspaceTag("a")));
+  assert.ok(!f.images.at(-1).includes(workspaceTag("a")));
   f.emit({ snapshot: null, error: "offline" });
   await tick();
   assert.doesNotMatch(f.images.at(-1), /sateto/u);
-  assert.ok(f.images.at(-1).includes(workspaceTag("a")));
+  assert.ok(!f.images.at(-1).includes(workspaceTag("a")));
   assert.match(f.images.at(-1), /状態不明/u);
 });
 
@@ -96,7 +96,7 @@ test("短タグ衝突と同名が重なる既知一覧では、状態キーに�
     ),
   );
   await tick();
-  assert.match(f.images.at(-1), /表示重複/u);
+  assert.match(f.images.at(-1), /要照合/u);
   await f.buttons.press(f.key.id);
   assert.deepEqual(opens, []);
   assert.match(f.errors[0]?.error ?? "", /完全ID.*パス/u);
@@ -150,7 +150,7 @@ for (const names of [
     await tick();
     await f.buttons.press(f.key.id);
     assert.deepEqual(opens, []);
-    assert.match(f.images.at(-1), /表示重複/u);
+    assert.match(f.images.at(-1), /要照合/u);
   });
 }
 

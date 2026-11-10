@@ -1,20 +1,55 @@
-import { shorten, svgText, twoLines } from "./key-text";
+import {
+  inputWorkspaceText,
+  type KeyIcon,
+  keyColors,
+  keyFrame,
+  keyHeader,
+  keyName,
+  keyText,
+} from "./key-layout";
 import type { ActiveRecipient } from "./orca/active-input";
-import { recipientLine } from "./recipient-label";
-import { identityLine } from "./workspace-identity";
+import { locationFitsKey } from "./recipient-label";
 export function activeInputImage(
   recipient: ActiveRecipient | undefined,
   label: string,
   enter: boolean,
   phase: string,
 ): string {
-  const [a, b] = twoLines(recipient?.workspace.name ?? "入力先未取得");
-  const position = recipient
-    ? recipientLine({
-        identity: recipient.target.identity,
-        location: recipient.location,
-      })
-    : "表示AIへ入力";
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="16" fill="#4d397b"/><g fill="#fff" font-family="-apple-system, sans-serif" text-anchor="middle">${svgText(enter ? "入力＋Enter" : "入力のみ", 19, 14)}${svgText(recipient ? identityLine(recipient.context) : "表示先を確認", 35, 12)}${svgText(a, 57, 16)}${svgText(b, 77, 16)}${svgText(position, 97, 12)}${svgText(shorten(label, 14), 116, 16)}${svgText(phase, 134, 14)}</g></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  const [status, icon]: [string, KeyIcon] = /不明|未確認/u.test(phase)
+    ? ["不明", "question"]
+    : /拒否/u.test(phase)
+      ? ["拒否", "cross"]
+      : /中止/u.test(phase)
+        ? ["中止", "pause"]
+        : /確認中/u.test(phase)
+          ? ["処理", "spinner"]
+          : /受付/u.test(phase)
+            ? ["受付", "check"]
+            : /設定/u.test(phase)
+              ? ["設定", "warning"]
+              : /取得でき|失敗/u.test(phase)
+                ? ["失敗", "warning"]
+                : /更新|取得中/u.test(phase)
+                  ? ["更新", "spinner"]
+                  : ["", "input"];
+  const location = recipient
+    ? locationFitsKey(recipient.location)
+      ? recipient.location
+      : "位置不明"
+    : "";
+  const color = /不明|拒否|中止|設定|失敗/u.test(status)
+    ? keyColors.error
+    : keyColors.input;
+  return keyFrame(
+    color,
+    keyHeader(status, icon, enter ? "送信" : "入力") +
+      keyName(label, 26, 55, 83) +
+      keyText(
+        recipient ? inputWorkspaceText(recipient.workspace) : "入力先未取得",
+        72,
+        109,
+        20,
+      ) +
+      keyText(location, 72, 135, 20),
+  );
 }

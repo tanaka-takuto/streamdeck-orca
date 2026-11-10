@@ -295,7 +295,7 @@ test("表示候補AからBへの画像待ち中は入力0、表示更新だけ�
     isKey: () => true,
     async setImage(image) {
       const s = decodeURIComponent(image);
-      if (block && s.includes("TargetB"))
+      if (block && s.includes("WS-B"))
         await new Promise((r) => {
           release = r;
         });
@@ -309,7 +309,7 @@ test("表示候補AからBへの画像待ち中は入力0、表示更新だけ�
     const r = await resolveA();
     return {
       ...r,
-      workspace: { ...r.workspace, name: "TargetB" },
+      workspace: { ...r.workspace, name: "WS-B" },
       target: { ...r.target, handle: "B" },
     };
   };
@@ -318,7 +318,7 @@ test("表示候補AからBへの画像待ち中は入力0、表示更新だけ�
   await tick();
   await a.onKeyDown({ action: key });
   assert.deepEqual(sent, []);
-  assert.doesNotMatch(visible, /TargetB/);
+  assert.doesNotMatch(visible, /WS-B/);
   block = false;
   release();
   await tick();
@@ -336,7 +336,7 @@ test("A画像のままB更新待ちで拒否した結果は、未表示Bでは�
     id: "receipt-target",
     isKey: () => true,
     async setImage(image) {
-      if (decodeURIComponent(image).includes("TargetB"))
+      if (decodeURIComponent(image).includes("WS-B"))
         await new Promise((r) => {
           release = r;
         });
@@ -352,7 +352,7 @@ test("A画像のままB更新待ちで拒否した結果は、未表示Bでは�
     const r = await resolveA();
     return {
       ...r,
-      workspace: { ...r.workspace, id: "B", name: "TargetB" },
+      workspace: { ...r.workspace, id: "B", name: "WS-B" },
       target: { ...r.target, handle: "B" },
     };
   };

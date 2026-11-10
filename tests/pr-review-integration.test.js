@@ -284,17 +284,19 @@ console.log(JSON.stringify({ok:true,_meta:{runtimeId:'runtime'},result}));`,
     controller: "Keypad",
     settings: { handoff: "none" },
   });
-  await wait(() => image().includes("120件") && image().includes("#2"));
+  await wait(() => image().includes(">120<") && image().includes("#2"));
   sendButton("keyDown");
   sendButton("keyDown");
-  await wait(() => image().includes("WSを開きました"));
+  await wait(
+    () => image().includes(">移動<") && image().includes('data-icon="folder"'),
+  );
   assert.equal(launches.length, 2);
   assert.ok(activations.includes("id:repo::/fake/pr2"));
   writeFileSync(listPath, JSON.stringify([3]));
   sendButton("didReceiveSettings", {
     settings: { handoff: "draft", body: "Button {{PR_LINK}}" },
   });
-  await wait(() => image().includes("#3") && image().includes("下書き"));
+  await wait(() => image().includes("#3") && image().includes(">入力<"));
   sendButton("keyDown");
   await wait(
     () =>
@@ -307,16 +309,20 @@ console.log(JSON.stringify({ok:true,_meta:{runtimeId:'runtime'},result}));`,
     text: "Button https://github.com/acme/app/pull/3",
     delivery: "draft",
   });
-  await wait(() => image().includes("起動受付済み"));
+  await wait(() => image().includes(">受付<"));
   sendButton("keyDown");
-  await wait(() => image().includes("WSを開きました"));
+  await wait(
+    () => image().includes(">移動<") && image().includes('data-icon="folder"'),
+  );
   assert.equal(launches.length, 3);
   defaultAgent = "omp";
   writeFileSync(listPath, JSON.stringify([4]));
   sendButton("didReceiveSettings", { settings: { handoff: "none", body: "" } });
-  await wait(() => image().includes("#4") && image().includes("AI起動のみ"));
+  await wait(
+    () => image().includes("#4") && image().includes('data-icon="pr"'),
+  );
   sendButton("keyDown");
-  await wait(() => launches.length === 4 && image().includes("起動受付済み"));
+  await wait(() => launches.length === 4 && image().includes(">受付<"));
   assert.equal("prompt" in launches[3], false);
   assert.equal(launches[3].agent, "omp");
   assert.deepEqual(settings.workspaceSelections, {

@@ -1,11 +1,19 @@
 import { settleDisplay } from "./display-wait";
-import { shorten, svgText, twoLines } from "./key-text";
+import {
+  type KeyIcon,
+  keyColors,
+  keyFrame,
+  keyHeader,
+  keyName,
+  keyProjectText,
+  keyStatus,
+} from "./key-layout";
+import { shorten } from "./key-text";
 import type { OrcaClient } from "./orca/client";
 import { getWorkspaceStatus, type WorkspaceStatus } from "./orca/model";
 import type { MonitorState, WorkspaceMonitor } from "./orca/monitor";
 import {
   ambiguousMessage,
-  identityLine,
   type KeyContext,
   workspaceIdentity,
 } from "./workspace-identity";
@@ -37,14 +45,33 @@ type Binding = {
 
 const styles: Record<
   DisplayStatus,
-  { color: string; symbol: string; lines: string[] }
+  { color: string; icon: KeyIcon; label: string }
 > = {
-  working: { color: "#145c9e", symbol: "", lines: ["進行中"] },
-  waiting: { color: "#965200", symbol: "?", lines: ["入力待ち"] },
-  review: { color: "#086a64", symbol: "!", lines: ["返答あり", "要確認"] },
-  idle: { color: "#374151", symbol: "−", lines: ["待機"] },
-  unknown: { color: "#55384f", symbol: "?", lines: ["状態不明"] },
-  unassigned: { color: "#30343b", symbol: "−", lines: ["未割当"] },
+  working: { color: keyColors.working, icon: "spinner", label: "進行中" },
+  waiting: { color: keyColors.waiting, icon: "waiting", label: "入力待ち" },
+  review: { color: keyColors.review, icon: "reply", label: "返答あり" },
+  idle: { color: keyColors.idle, icon: "pause", label: "待機" },
+  unknown: { color: keyColors.unknown, icon: "question", label: "状態不明" },
+  unassigned: { color: keyColors.idle, icon: "plus", label: "未割当" },
+};
+const feedbackLabels: Record<string, [string, KeyIcon]> = {
+  登録まで長押し: ["登録待ち", "spinner"],
+  移動待ち: ["判定待ち", "pause"],
+  選択WSを取得中: ["WS取得中", "spinner"],
+  登録を保存中: ["保存中", "spinner"],
+  登録完了: ["登録済", "check"],
+  移動中: ["移動中", "spinner"],
+  関連先を取得中: ["関連取得", "spinner"],
+  関連先を開いた: ["リンク", "link"],
+  関連先を保存: ["保存済", "link"],
+  長押しで登録: ["未割当", "plus"],
+  保存結果不明: ["保存不明", "question"],
+  関連先なし: ["リンク無", "link"],
+  選択先消失: ["消失", "warning"],
+  関連先が複数: ["複数", "link"],
+  取得失敗: ["取得失敗", "warning"],
+  登録失敗: ["登録失敗", "warning"],
+  "環境変更・再操作": ["環境変更", "warning"],
 };
 
 export function keyImage(
@@ -55,31 +82,26 @@ export function keyImage(
   feedback?: string,
 ): string {
   const style = styles[status];
-  const [first, second] = twoLines(name);
-  const hint =
-    feedback ||
-    (context?.ambiguous
-      ? "表示重複・要照合"
-      : status === "review"
-        ? "要確認・開く"
-        : status === "unassigned"
-          ? "長押しで登録"
-          : "短押しで移動");
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
-<rect width="144" height="144" rx="16" fill="${style.color}"/>
-<g fill="#fff" font-family="-apple-system, sans-serif" text-anchor="middle">
-${context?.controlId ? svgText(`ID ${shorten(context.controlId, 11)} · 開く`, 19, 12) : ""}
-${svgText(identityLine(context), context?.controlId ? 35 : 25, 12)}
-${svgText(first, 54, context?.controlId ? 16 : 18)}${svgText(second, 77, context?.controlId ? 16 : 18)}
-${
-  status === "working"
-    ? `<g fill="none" stroke="#fff" stroke-width="3"><circle cx="22" cy="100" r="8" opacity="0.25"/><path d="M22 92 A8 8 0 0 1 30 100" stroke-linecap="round" transform="rotate(${(frame % 12) * 30} 22 100)"/></g>`
-    : svgText(style.symbol, 108, 23, 22)
-}
-${svgText(style.lines[0], 107, 18, 83)}
-${svgText(hint, 132, 14)}
-</g></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  const [label, icon] = context?.ambiguous
+    ? ["要照合", "warning" as const]
+    : feedback
+      ? (feedbackLabels[feedback] ?? [shorten(feedback, 8), "warning" as const])
+      : [style.label, style.icon];
+  const color =
+    context?.ambiguous || (feedback && /失敗|不明|消失|変更/u.test(feedback))
+      ? keyColors.error
+      : style.color;
+  return keyFrame(
+    color,
+    keyHeader(
+      keyProjectText(context?.project),
+      status === "unassigned" ? "plus" : "folder",
+    ) +
+      keyName(status === "unassigned" ? "未割当" : name) +
+      (status === "unassigned" && !feedback
+        ? ""
+        : keyStatus(label, icon, icon === "spinner" ? frame : undefined)),
+  );
 }
 
 export class WorkspaceButtons {

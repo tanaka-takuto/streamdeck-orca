@@ -1,4 +1,5 @@
-import { displayText, shorten, twoLines } from "./key-text";
+import { inputWorkspaceText, keyNameLines, keyProjectText } from "./key-layout";
+import { displayText, shorten } from "./key-text";
 import type { OrcaWorkspace } from "./orca/model";
 export type WorkspaceIdentity = {
   id: string;
@@ -15,16 +16,19 @@ export function workspaceTag(id: string): string {
     hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 16777619);
   return (hash >>> 0).toString(36).padStart(7, "0");
 }
-const visibleIdentity = (w: OrcaWorkspace) =>
-  JSON.stringify([identityLine(w), twoLines(w.name)]);
+const visibleIdentity = (w: OrcaWorkspace, format: "workspace" | "input") =>
+  format === "input"
+    ? inputWorkspaceText(w)
+    : JSON.stringify([keyProjectText(w.project), keyNameLines(w.name)]);
 export function workspaceIdentity(
   id: string | undefined,
   workspace: OrcaWorkspace | undefined,
   catalog: readonly OrcaWorkspace[] = [],
+  format: "workspace" | "input" = "workspace",
 ): WorkspaceIdentity | undefined {
   if (!id) return undefined;
   const w = workspace?.id === id ? workspace : undefined;
-  const displayed = w ? visibleIdentity(w) : undefined;
+  const displayed = w ? visibleIdentity(w, format) : undefined;
   return {
     id,
     tag: workspaceTag(id),
@@ -34,7 +38,8 @@ export function workspaceIdentity(
     ambiguous:
       !!w &&
       catalog.some(
-        (other) => other.id !== id && visibleIdentity(other) === displayed,
+        (other) =>
+          other.id !== id && visibleIdentity(other, format) === displayed,
       ),
   };
 }

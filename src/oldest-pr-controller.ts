@@ -1,20 +1,34 @@
 import type { GitHubReviews, ReviewList, ReviewPR } from "./github/reviews";
 import { prKey } from "./github/reviews";
-import { svgText, twoLines } from "./key-text";
+import {
+  type KeyIcon,
+  keyColors,
+  keyFrame,
+  keyHeader,
+  keyPRSignature,
+  keyPRText,
+  keyText,
+} from "./key-layout";
 import type {
   ReviewLauncher,
   ReviewLaunchResult,
+  ReviewRecord,
 } from "./orca/review-launcher";
+import { reviewRecordFingerprint } from "./orca/review-launcher";
 import {
   normalizeOldestReviewSettings,
   type ReviewSettings,
-  reviewAgentLabel,
 } from "./pr-review-settings";
 import type { WorkspaceKey } from "./workspace-buttons";
-import { workspaceTag } from "./workspace-identity";
 
 type Key = WorkspaceKey & { device?: { id: string; isConnected?: boolean } };
-type Intent = { pr: ReviewPR; accountId: number; count: number };
+type Intent = {
+  pr: ReviewPR;
+  accountId: number;
+  count: number;
+  recordState?: string;
+  recordStatus?: ReviewRecord["status"];
+};
 type Binding = {
   key: Key;
   settings: ReturnType<typeof normalizeOldestReviewSettings>;
@@ -26,6 +40,7 @@ type Binding = {
   message?: string;
   result?: ReviewLaunchResult;
   resultFor?: string;
+  displayError?: string;
 };
 const signature = (i: Intent) => `${i.accountId}:${prKey(i.pr)}`;
 export const handoffLabel = (mode: string) =>
@@ -42,27 +57,90 @@ export function oldestReviewImage(data: {
   handoff: string;
   agent?: string;
   error?: boolean;
+  recordStatus?: ReviewRecord["status"] | "unavailable";
 }): string {
   const label =
-    data.count === undefined
+    data.incomplete || data.count === undefined
       ? "—"
-      : data.incomplete
-        ? "未確定"
-        : `${data.count}件`;
-  const lines = twoLines(data.pr?.repo ?? "", 18);
-  const size = Math.min(
-    34,
-    Math.floor(124 / (Math.max(1, label.length - 1) * 0.62 + 1)),
+      : data.count > 999
+        ? "999+"
+        : String(data.count);
+  const accepted =
+    data.recordStatus === "accepted" ||
+    /起動受付済み|WSを開きました/u.test(data.phase);
+  const unknown =
+    (data.recordStatus && data.recordStatus !== "accepted") ||
+    /結果不明/u.test(data.phase);
+  const mode =
+    accepted ||
+    unknown ||
+    data.incomplete ||
+    data.error ||
+    /表示重複|要照合|番号/u.test(data.phase) ||
+    /更新中/u.test(data.phase) ||
+    !data.pr
+      ? undefined
+      : data.handoff === "send"
+        ? ("送信" as const)
+        : data.handoff === "draft"
+          ? ("入力" as const)
+          : undefined;
+  const [heading, icon]: [string, KeyIcon] = /表示重複|要照合|番号/u.test(
+    data.phase,
+  )
+    ? ["要照合", "warning"]
+    : data.incomplete
+      ? ["未確定", "warning"]
+      : data.recordStatus === "unavailable"
+        ? ["取得失敗", "warning"]
+        : unknown
+          ? ["不明", "question"]
+          : /失敗/u.test(data.phase)
+            ? [data.pr ? "失敗" : "取得失敗", "warning"]
+            : /WSを開きました/u.test(data.phase)
+              ? ["移動", "folder"]
+              : accepted
+                ? /起動中/u.test(data.phase)
+                  ? ["移動", "spinner"]
+                  : ["受付", "check"]
+                : /起動中/u.test(data.phase)
+                  ? ["処理", "spinner"]
+                  : /更新中/u.test(data.phase)
+                    ? ["更新", "spinner"]
+                    : ["", "pr"];
+  const color = data.error || unknown ? keyColors.error : keyColors.reviewQueue;
+  const pr = data.pr ? keyPRText(data.pr) : undefined;
+  return keyFrame(
+    color,
+    keyHeader(heading, icon, mode) +
+      keyText(label, 72, 68, label.length > 3 ? 44 : 50, true) +
+      (pr
+        ? keyText(pr.owner, 72, 92) +
+          keyText(pr.repo, 72, 114) +
+          keyText(pr.fits ? pr.number : "番号要照合", 72, 136)
+        : keyText(
+            data.count === 0 && !data.incomplete
+              ? "依頼なし"
+              : data.incomplete
+                ? "一部取得"
+                : "未取得",
+            72,
+            110,
+            24,
+          )),
   );
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="16" fill="${data.error ? "#633449" : data.count === 0 ? "#374151" : "#145c9e"}"/><g fill="#fff" font-family="-apple-system,sans-serif" text-anchor="middle">${svgText("レビュー待ち", 20, 14)}${svgText(label, 59, size)}${svgText(lines[0], 79, 12)}${svgText(lines[1], 94, 12)}${svgText(data.pr ? `#${data.pr.number} · ${workspaceTag(data.pr.repo.toLowerCase())}` : "", 108, 12)}${svgText(`${reviewAgentLabel(data.agent)} · ${handoffLabel(data.handoff)}`, 123, 11)}${svgText(data.phase, 139, 11)}</g></svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 /** One personal queue. A rendered target must survive a fresh oldest-first lookup. */
 export class OldestPRController {
   private readonly bindings = new Map<string, Binding>();
   private readonly queues = new Map<string, Promise<void>>();
+  private readonly lastDisplays = new Map<
+    string,
+    { signature: string; projection: string }
+  >();
   private data?: ReviewList;
   private error?: string;
+  private journal?: { target: string; record?: ReviewRecord; error?: string };
   private updating = false;
   private at?: number;
   private epoch = 0;
@@ -72,6 +150,10 @@ export class OldestPRController {
     private readonly github: Pick<GitHubReviews, "list">,
     private readonly launcher: Pick<ReviewLauncher, "launch" | "forget">,
     private readonly interval = 30000,
+    private readonly readRecord: (
+      accountId: number,
+      pr: ReviewPR,
+    ) => Promise<ReviewRecord | undefined> = async () => undefined,
   ) {}
   bind(key: Key, raw: ReviewSettings): void {
     this.unbind(key.id);
@@ -97,6 +179,7 @@ export class OldestPRController {
       ++this.epoch;
       clearTimeout(this.timer);
       this.data = undefined;
+      this.journal = undefined;
       this.error = undefined;
       this.updating = false;
     }
@@ -137,6 +220,19 @@ export class OldestPRController {
         this.data = data;
         this.error = undefined;
         this.at = Date.now();
+        const intent = this.intent();
+        this.journal = undefined;
+        if (intent) {
+          let record: ReviewRecord | undefined, error: string | undefined;
+          try {
+            record = await this.readRecord(intent.accountId, intent.pr);
+          } catch (e) {
+            error =
+              e instanceof Error ? e.message : "起動記録を取得できません。";
+          }
+          if (epoch !== this.epoch) return;
+          this.journal = { target: signature(intent), record, error };
+        }
       } catch (error) {
         if (epoch === this.epoch) {
           this.data = undefined;
@@ -165,8 +261,40 @@ export class OldestPRController {
   private intent(): Intent | undefined {
     const pr = this.data?.rows[0];
     return pr && this.data
-      ? { pr, accountId: this.data.accountId, count: this.data.totalCount }
+      ? {
+          pr,
+          accountId: this.data.accountId,
+          count: this.data.totalCount,
+          recordStatus:
+            this.journal?.target === `${this.data.accountId}:${prKey(pr)}`
+              ? this.journal.record?.status
+              : undefined,
+          recordState:
+            this.journal?.target === `${this.data.accountId}:${prKey(pr)}`
+              ? reviewRecordFingerprint(this.journal.record)
+              : undefined,
+        }
       : undefined;
+  }
+  private displayIssue(b: Binding, intent?: Intent): string | undefined {
+    if (!intent) return;
+    if (!keyPRText(intent.pr).fits)
+      return "PR番号を液晶に完全表示できません。設定画面の完全な参照を確認してください。";
+    const projection = keyPRSignature(intent.pr);
+    if (
+      this.data?.rows.some(
+        (pr) =>
+          prKey(pr) !== prKey(intent.pr) && keyPRSignature(pr) === projection,
+      )
+    )
+      return "液晶のPR表示が重複しています。設定画面で完全な参照を確認してください。";
+    const previous = this.lastDisplays.get(b.key.id);
+    if (
+      previous &&
+      previous.signature !== signature(intent) &&
+      previous.projection === projection
+    )
+      return "前のPRと同じ短縮表示になりました。設定画面で完全な参照を照合してください。";
   }
   private render(b: Binding): void {
     if (!this.current(b)) return;
@@ -178,41 +306,61 @@ export class OldestPRController {
       b.message = undefined;
       b.error = undefined;
     }
-    const applicable = b.resultFor === context;
-    const phase = b.busy
-      ? "起動中・お待ちください"
-      : this.error
-        ? "取得失敗"
-        : this.data?.incomplete
-          ? "一部取得・起動不可"
-          : this.updating
-            ? "更新中"
-            : b.error
-              ? "起動失敗・設定で確認"
-              : applicable && b.result?.status === "unknown"
-                ? "結果不明・設定で確認"
-                : applicable && b.result?.status === "opened"
-                  ? "WSを開きました"
-                  : applicable && b.result?.status === "accepted"
-                    ? "起動受付済み"
-                    : !intent
-                      ? "レビュー依頼なし"
-                      : "押:AI起動/WS";
     const version = ++b.version;
     b.shown = undefined;
-    const image = oldestReviewImage({
-      count: b.busy ? b.intent?.count : this.data?.totalCount,
-      incomplete: this.data?.incomplete,
-      pr: intent?.pr,
-      phase,
-      handoff: b.settings.handoff,
-      agent: b.settings.agent,
-      error: !!this.error || !!b.error || this.data?.incomplete,
-    });
     const pending = (this.queues.get(b.key.id) ?? Promise.resolve())
       .catch(() => {})
       .then(async () => {
         if (!this.current(b) || b.version !== version) return;
+        b.displayError = this.displayIssue(b, intent);
+        const applicable = b.resultFor === context;
+        const phase = b.displayError
+          ? "表示重複・要照合"
+          : b.busy
+            ? "起動中・お待ちください"
+            : this.error
+              ? "取得失敗"
+              : this.data?.incomplete
+                ? "一部取得・起動不可"
+                : this.updating
+                  ? "更新中"
+                  : b.error
+                    ? "起動失敗・設定で確認"
+                    : applicable && b.result?.status === "unknown"
+                      ? "結果不明・設定で確認"
+                      : applicable && b.result?.status === "opened"
+                        ? "WSを開きました"
+                        : applicable && b.result?.status === "accepted"
+                          ? "起動受付済み"
+                          : !intent
+                            ? "レビュー依頼なし"
+                            : "押:AI起動/WS";
+        const image = oldestReviewImage({
+          count: b.busy ? b.intent?.count : this.data?.totalCount,
+          incomplete: this.data?.incomplete,
+          pr: intent?.pr,
+          phase,
+          handoff: b.settings.handoff,
+          agent: b.settings.agent,
+          recordStatus: b.busy
+            ? intent?.recordStatus
+            : this.journal?.error
+              ? "unavailable"
+              : intent?.recordStatus,
+          error:
+            !!this.error ||
+            !!this.journal?.error ||
+            !!b.error ||
+            !!b.displayError ||
+            this.data?.incomplete,
+        });
+        const deliveredIssue = b.displayError;
+        // Even a rejected/obsolete write may reach the device. Reserve its projection before sending.
+        if (intent && !deliveredIssue)
+          this.lastDisplays.set(b.key.id, {
+            signature: signature(intent),
+            projection: keyPRSignature(intent.pr),
+          });
         await b.key.setImage(image);
         if (
           this.current(b) &&
@@ -220,10 +368,13 @@ export class OldestPRController {
           !b.busy &&
           !this.updating &&
           !this.error &&
+          !this.journal?.error &&
+          !b.displayError &&
           !this.data?.incomplete &&
           intent
-        )
+        ) {
           b.shown = { ...intent, pr: { ...intent.pr } };
+        }
       })
       .catch(() => {
         if (this.current(b) && b.version === version) {
@@ -254,6 +405,9 @@ export class OldestPRController {
       this.current(b) &&
       b.intent === shown &&
       !this.error &&
+      !this.journal?.error &&
+      this.intent()?.recordState === shown.recordState &&
+      !this.displayIssue(b, shown) &&
       !this.data?.incomplete &&
       !!this.intent() &&
       signature(this.intent() as Intent) === signature(shown);
@@ -267,15 +421,27 @@ export class OldestPRController {
         }
         return;
       }
+      if (this.journal?.record && this.journal.record.status !== "accepted") {
+        b.result = {
+          status: "unknown",
+          message: this.journal.record.message,
+          record: this.journal.record,
+        };
+        await b.key.showAlert().catch(() => {});
+        return;
+      }
       const result = await this.launcher.launch(
         shown.pr,
         shown.accountId,
         b.settings,
         current,
         "asc",
+        shown.recordState,
       );
       if (this.current(b)) {
         b.result = result;
+        if (result.record)
+          this.journal = { target: signature(shown), record: result.record };
         b.message = `${shown.pr.repo} #${shown.pr.number}: ${result.message}`;
         if (result.status === "accepted" || result.status === "opened")
           await b.key.showOk?.().catch(() => {});
@@ -318,7 +484,7 @@ export class OldestPRController {
       b.result = undefined;
       b.error = undefined;
       b.message = `${shown.pr.repo} #${shown.pr.number}: 起動記録を解除しました。`;
-      this.render(b);
+      await this.refresh(id);
     }
   }
   view(id: string) {
@@ -335,9 +501,9 @@ export class OldestPRController {
       updating: this.updating,
       busy: b.busy,
       at: this.at,
-      error: b.error ?? this.error,
+      error: b.displayError ?? b.error ?? this.journal?.error ?? this.error,
       message: b.message,
-      record: b.result?.record,
+      record: b.result?.record ?? this.journal?.record,
     };
   }
 }

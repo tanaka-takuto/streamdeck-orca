@@ -20,7 +20,16 @@ for (const phase of [
         activeInputImage(undefined, "label", true, phase),
       );
     assert.notEqual(off, on);
-    assert.match(off, />入力のみ</);
-    assert.match(on, />入力＋Enter</);
-    assert.ok(off.includes(phase) && on.includes(phase));
+    assert.match(off, />入力</);
+    assert.match(on, />送信</);
+    const visible = {
+      受付済み: "受付",
+      入力拒否: "拒否",
+      結果未確認: "不明",
+      入力中止: "中止",
+      受付確認中: "処理",
+      更新待ち: "更新",
+      設定で確認: "設定",
+    }[phase];
+    assert.ok(off.includes(`>${visible}<`) && on.includes(`>${visible}<`));
   });

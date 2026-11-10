@@ -54,7 +54,8 @@ test("専用キーは表示済み AI に入力し、保存や選択変更だけ�
     (m) =>
       m.event === "setImage" &&
       m.context === "input" &&
-      decodeURIComponent(m.payload.image).includes("押して入力"),
+      decodeURIComponent(m.payload.image).includes("Pr/") &&
+      decodeURIComponent(m.payload.image).includes('data-icon="input"'),
   );
   assert.deepEqual(f.executions(), []);
   f.setActiveSelection("b");
@@ -81,12 +82,13 @@ test("専用キーは表示済み AI に入力し、保存や選択変更だけ�
     (m) =>
       m.event === "setImage" &&
       m.context === "input" &&
-      decodeURIComponent(m.payload.image).includes("入力＋Enter") &&
-      decodeURIComponent(m.payload.image).includes("押して入力"),
+      decodeURIComponent(m.payload.image).includes(">送信<") &&
+      decodeURIComponent(m.payload.image).includes("Pr/") &&
+      decodeURIComponent(m.payload.image).includes('data-icon="input"'),
     start,
   );
   const displayedA = decodeURIComponent(preview.payload.image).includes(
-    ">A</text>",
+    "/A</text>",
   );
   f.setActiveSelection(displayedA ? "b" : "a");
   f.send("keyDown", "input", "active");
@@ -396,9 +398,7 @@ test("確認先キーだけで待ちと返答を一巡し、状態ボタンの�
   assert.ok(
     f.history
       .filter((m) => m.context === "nav" && m.event === "setImage")
-      .some((m) =>
-        decodeURIComponent(m.payload.image).includes("入力 2 · 返答 1"),
-      ),
+      .some((m) => decodeURIComponent(m.payload.image).includes("入力待ち")),
   );
 });
 test("確認先の消失後は表示を更新するが、その押下で代わりの相手を開かない", async (t) => {
@@ -413,9 +413,9 @@ test("確認先の消失後は表示を更新するが、その押下で代わ�
   await f.wait(imageContains("nav", "B"));
   const start = f.history.length;
   f.send("keyDown", "nav", "attention");
-  await f.wait(imageContains("nav", "開いています"), start);
+  await f.wait(imageContains("nav", "移動中"), start);
   const opening = f.history.length;
-  await f.wait(imageContains("nav", "押して開く"), opening);
+  await f.wait(imageContains("nav", "入力待ち"), opening);
   assert.equal(f.switches().at(-1)[3], "fresh-b");
 });
 

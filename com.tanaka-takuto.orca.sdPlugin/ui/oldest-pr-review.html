@@ -5,6 +5,7 @@
 <p class="eyebrow">ORCA / OLDEST REVIEW</p>
 <h1>最古のレビュー依頼</h1>
 <p class="description">自分に直接届いたレビュー依頼を、更新日時が古い順に扱います。ボタンに件数と次のPRを表示し、押すと対象ブランチのWSでAIを起動します。</p>
+<p class="hint">液晶は件数を大きく、owner・repo・PR番号を下段に表示します。1000件以上は「999+」、正確な件数は下の欄で確認できます。「入力」は下書き、「送信」はEnterあり。起動済みはチェックと「受付」、結果不明は疑問符と「不明」を表示し、送信予定の表示を外します。</p>
 <form id="review-form">
 <label for="agent">起動するAI</label><select id="agent" disabled><option value="default">Orcaのデフォルト</option><option value="codex">Codex</option><option value="claude">Claude Code</option></select>
 <p class="hint">Orcaのデフォルトは押す時点のOrca設定を使います。未設定・通常ターミナル・無効なAIの場合は起動しません。</p>

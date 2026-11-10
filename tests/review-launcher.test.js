@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadModule } from "./helpers/load-module.js";
 
-const { ReviewLauncher } = await loadModule("src/orca/review-launcher.ts");
+const { ReviewLauncher, reviewRecordFingerprint } = await loadModule(
+  "src/orca/review-launcher.ts",
+);
 const { reviewPrompt, normalizeReviewSettings, normalizeOldestReviewSettings } =
   await loadModule("src/pr-review-settings.ts");
 const pr = {
@@ -421,4 +423,37 @@ test("最古ボタンは同じPRのSHAが変わりWSを更新済みでもAIを�
   );
   assert.equal(r.status, "opened");
   assert.equal(f.calls.filter((a) => a[0] === "agent.launchReplay").length, 1);
+});
+
+test("表示した起動記録がlauncherの最終読取で消えた場合はAIもWSも操作しない", async () => {
+  const f = fixture();
+  await f.launcher.launch(pr, 7, { agent: "codex", body: "review" });
+  const fingerprint = reviewRecordFingerprint(Object.values(f.records)[0]);
+  for (const key of Object.keys(f.records)) delete f.records[key];
+  const before = f.calls.length;
+  const result = await f.launcher.launch(
+    pr,
+    7,
+    { handoff: "send", body: "review" },
+    () => true,
+    "asc",
+    fingerprint,
+  );
+  assert.equal(result.status, "cancelled");
+  assert.deepEqual(f.calls.slice(before), []);
+});
+test("表示した未起動状態に別の記録が加わればlauncherでも作用を差し替えない", async () => {
+  const f = fixture();
+  await f.launcher.launch(pr, 7, { agent: "codex", body: "review" });
+  const before = f.calls.length;
+  const result = await f.launcher.launch(
+    pr,
+    7,
+    { handoff: "send", body: "review" },
+    () => true,
+    "asc",
+    "null",
+  );
+  assert.equal(result.status, "cancelled");
+  assert.deepEqual(f.calls.slice(before), []);
 });

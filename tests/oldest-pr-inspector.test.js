@@ -192,3 +192,16 @@ test("設定保存中の古い応答を無視し、記録解除は同じaccount�
   assert.equal(f.nodes.get("confirmed").checked, false);
   assert.equal(f.nodes.get("forget").disabled, true);
 });
+
+test("液晶の短縮表示が重なる場合も設定画面に完全な候補を表示し、未確定と明記する", () => {
+  const f = fixture();
+  f.view({
+    selected: undefined,
+    error: "液晶のPR表示が重複しています。完全な参照を確認してください。",
+  });
+  const detail = f.nodes.get("selected").textContent;
+  assert.match(detail, /acme\/app #1/u);
+  assert.match(detail, /https:\/\/github.com\/acme\/app\/pull\/1/u);
+  assert.match(detail, /未確定|起動不可/u);
+  assert.equal(f.nodes.get("forget").disabled, true);
+});

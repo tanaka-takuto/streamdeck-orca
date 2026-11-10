@@ -35,6 +35,22 @@ export type ReviewLaunchResult = {
   message: string;
   record?: ReviewRecord;
 };
+export const reviewRecordFingerprint = (r?: ReviewRecord): string =>
+  r ? JSON.stringify([r.status, r.operationId, r.workspaceId, r.at]) : "null";
+/** The personal queue reuses the latest record across head commits; uncertainty wins ties. */
+export function latestReviewRecord(
+  records: Record<string, ReviewRecord>,
+  accountId: number,
+  pr: ReviewPR,
+): ReviewRecord | undefined {
+  return Object.values(records)
+    .filter((r) => r && r.accountId === accountId && prKey(r.pr) === prKey(pr))
+    .sort(
+      (a, b) =>
+        b.at - a.at ||
+        Number(a.status === "accepted") - Number(b.status === "accepted"),
+    )[0];
+}
 type Dependencies = {
   github: Pick<GitHubReviews, "detail">;
   run: CliRunner;
@@ -174,6 +190,7 @@ export class ReviewLauncher {
     raw: ReviewSettings,
     isCurrent = () => true,
     order: ReviewOrder = "desc",
+    expectedRecord?: string,
   ): Promise<ReviewLaunchResult> {
     const lock = `${accountId}:${prKey(pr)}`;
     if (this.busy.has(lock))
@@ -203,22 +220,17 @@ export class ReviewLauncher {
       const records = await this.deps.readRecords();
       const previous =
         order === "asc"
-          ? Object.values(records)
-              .filter(
-                (r) =>
-                  r && r.accountId === accountId && prKey(r.pr) === prKey(pr),
-              )
-              .sort(
-                (a, b) =>
-                  b.at - a.at ||
-                  Number(a.status === "accepted") -
-                    Number(b.status === "accepted"),
-              )[0]
+          ? latestReviewRecord(records, accountId, pr)
           : records[key];
-      if (!isCurrent())
+      if (
+        !isCurrent() ||
+        (expectedRecord !== undefined &&
+          expectedRecord !== reviewRecordFingerprint(previous))
+      )
         return {
           status: "cancelled",
-          message: "選択や設定が変わったため起動していません。",
+          message:
+            "選択・設定・起動記録が変わったため操作していません。表示を更新して押し直してください。",
         };
       if (previous) {
         if (previous.status === "accepted" && previous.workspaceId) {
@@ -300,10 +312,15 @@ export class ReviewLauncher {
         settings.agent === "default"
           ? await this.defaultAgent(runtimeId)
           : settings.agent;
-      if (!isCurrent())
+      if (
+        !isCurrent() ||
+        (expectedRecord !== undefined &&
+          expectedRecord !== reviewRecordFingerprint(previous))
+      )
         return {
           status: "cancelled",
-          message: "選択や設定が変わったため起動していません。",
+          message:
+            "選択・設定・起動記録が変わったため操作していません。表示を更新して押し直してください。",
         };
       record = {
         status: "pending",

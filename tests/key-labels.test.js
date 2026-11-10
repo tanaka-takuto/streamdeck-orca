@@ -38,7 +38,7 @@ test("確認先の名前に候補数で変わる順位を付けず、同じ対�
   );
 });
 
-test("状態キーは、同名の別ワークスペースをプロジェクトと短タグで照合できる", () => {
+test("状態キーに識別用ハッシュを表示せず、同一表示の曖昧さは移動側で検証する", () => {
   const a = { id: "workspace-a", project: "sateto" };
   const b = { id: "workspace-b", project: "sateto" };
   for (const render of [
@@ -46,9 +46,9 @@ test("状態キーは、同名の別ワークスペースをプロジェクト�
   ]) {
     const first = render(a);
     const second = render(b);
-    assert.notEqual(first, second);
+    assert.equal(first, second);
     assert.ok(text(first).includes("sateto"));
-    assert.ok(text(first).includes(workspaceTag(a.id)));
-    assert.ok(text(second).includes(workspaceTag(b.id)));
+    assert.ok(!text(first).includes(workspaceTag(a.id)));
+    assert.ok(!text(second).includes(workspaceTag(b.id)));
   }
 });

@@ -226,11 +226,11 @@ window.connectElgatoStreamDeckSocket = (port, id, register, _info, raw) => {
     }
     if (identity(v) !== identity(lastView)) confirmed.checked = false;
     lastView = v;
-    const p = v.selected;
+    const p = v.selected ?? v.candidate;
     selected.textContent = v.partial
       ? "検索が一部のため、最古PRは未確定です。"
       : p
-        ? `${p.repo} #${p.number}\n${p.title}\n${p.url}\n更新: ${new Date(p.updatedAt).toLocaleString()}`
+        ? `${v.selected ? "" : "液晶未確定の候補（起動不可）\n"}${p.repo} #${p.number}\n${p.title}\n${p.url}\n更新: ${new Date(p.updatedAt).toLocaleString()}`
         : v.error
           ? "取得・表示失敗：レビュー依頼を確認できません。"
           : v.updating

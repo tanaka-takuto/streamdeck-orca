@@ -12,7 +12,7 @@ const pr = (n) => ({
   author: "author",
   updatedAt: `2026-01-0${n}T00:00:00Z`,
 });
-function fixture(t) {
+function fixture(t, readRecord = async () => undefined) {
   let data = {
       account: "me",
       accountId: 7,
@@ -53,7 +53,7 @@ function fixture(t) {
     },
     async forget() {},
   };
-  const c = new OldestPRController(github, launcher, 60000);
+  const c = new OldestPRController(github, launcher, 60000, readRecord);
   function key(id = "k") {
     const k = {
       id,
@@ -97,13 +97,48 @@ function fixture(t) {
     },
   };
 }
+test("短縮後に同じになる別repoのPRは表示確定させず起動しない", async (t) => {
+  const f = fixture(t),
+    k = f.key();
+  f.data({
+    rows: [
+      { ...pr(1), repo: "owner-prefix-A-very-long-tail/app" },
+      { ...pr(1), repo: "owner-prefix-B-very-long-tail/app" },
+    ],
+  });
+  await f.bind(k);
+  await f.c.press(k.id);
+  assert.deepEqual(f.effects, []);
+  assert.match(f.c.view(k.id).error, /表示|照合/u);
+});
+test("直前に表示した別PRと同じ短縮表示になる更新も、別対象へ差し替えて起動しない", async (t) => {
+  const f = fixture(t),
+    k = f.key();
+  f.data({ rows: [{ ...pr(1), repo: "owner-prefix-A-very-long-tail/app" }] });
+  await f.bind(k);
+  f.data({ rows: [{ ...pr(1), repo: "owner-prefix-B-very-long-tail/app" }] });
+  await f.c.refresh(k.id);
+  await tick();
+  await f.c.press(k.id);
+  assert.deepEqual(f.effects, []);
+  assert.match(f.c.view(k.id).error, /表示|照合/u);
+});
+test("PR番号を完全表示できない場合は小字に縮めず詳細確認に止める", async (t) => {
+  const f = fixture(t),
+    k = f.key();
+  f.data({ rows: [{ ...pr(1), number: 123456789012345 }] });
+  await f.bind(k);
+  await f.c.press(k.id);
+  assert.deepEqual(f.effects, []);
+  assert.match(f.c.view(k.id).error, /番号/u);
+});
 test("全件数と最古PRを表示し個人宛てascで検索、再押下でも件数と対象を維持", async (t) => {
   const f = fixture(t),
     k = f.key();
   await f.bind(k, { reviewMode: "team" });
   assert.match(f.images.at(-1).image, />120<|120件/u);
   assert.match(f.images.at(-1).image, /#1/u);
-  assert.match(f.images.at(-1).image, /Orca既定/u);
+  assert.doesNotMatch(f.images.at(-1).image, /Orca既定/u);
   assert.deepEqual(f.queries[0], ["personal", undefined, "asc"]);
   await f.c.press(k.id);
   await tick();
@@ -234,21 +269,114 @@ test("最古PRが変わると旧PRの起動失敗を新しい対象へ残さな�
   };
   await f.c.press(k.id);
   await tick();
-  assert.match(f.images.at(-1).image, /起動失敗/u);
+  assert.match(f.images.at(-1).image, />失敗</u);
   f.data({ rows: [pr(2)], totalCount: 1 });
   await f.c.refresh(k.id);
   await tick();
-  assert.doesNotMatch(f.images.at(-1).image, /起動失敗/u);
+  assert.doesNotMatch(f.images.at(-1).image, />失敗</u);
   assert.equal(f.c.view(k.id).message, undefined);
 });
-test("ボタンに起動AIと渡し方を表示し、件数と候補の不整合を取得失敗にする", async (t) => {
+test("AI種別は設定に残し液晶は送信作用を示し、件数と候補の不整合を取得失敗にする", async (t) => {
   const f = fixture(t),
     k = f.key();
   await f.bind(k, { agent: "claude", handoff: "send" });
-  assert.match(f.images.at(-1).image, /Claude/u);
-  assert.match(f.images.at(-1).image, /入力して送信/u);
+  assert.doesNotMatch(f.images.at(-1).image, /Claude/u);
+  assert.match(f.images.at(-1).image, />送信</u);
   f.data({ rows: [], totalCount: 1 });
   await f.c.refresh(k.id);
   await tick();
   assert.match(f.images.at(-1).image, /取得失敗/u);
+});
+
+for (const status of ["accepted", "unknown", "pending"]) {
+  test(`永続${status}記録は再表示でも送信予定に見せない`, async (t) => {
+    const f = fixture(t, async () => ({ status, operationId: "saved", at: 1 })),
+      k = f.key();
+    await f.bind(k, { handoff: "send" });
+    assert.doesNotMatch(f.images.at(-1).image, />送信</u);
+    f.c.unbind(k.id);
+    await f.bind(k, { handoff: "send" });
+    assert.doesNotMatch(f.images.at(-1).image, />送信</u);
+    if (status !== "accepted") {
+      await f.c.press(k.id);
+      assert.deepEqual(f.effects, []);
+      assert.match(f.images.at(-1).image, />不明</u);
+    }
+  });
+}
+test("表示後に他キーがPRを起動した場合は作用を差し替えず押し直しにする", async (t) => {
+  let record;
+  const f = fixture(t, async () => record),
+    k = f.key();
+  await f.bind(k, { handoff: "send" });
+  record = { status: "accepted", operationId: "other-key", at: 2 };
+  await f.c.press(k.id);
+  await tick();
+  assert.deepEqual(f.effects, []);
+  assert.doesNotMatch(f.images.at(-1).image, />送信</u);
+});
+test("記録取得が失敗した場合は送信を表示せず起動しない", async (t) => {
+  const f = fixture(t, async () => {
+      throw Error("record unavailable");
+    }),
+    k = f.key();
+  await f.bind(k, { handoff: "send" });
+  await f.c.press(k.id);
+  assert.deepEqual(f.effects, []);
+  assert.doesNotMatch(f.images.at(-1).image, />送信</u);
+  assert.match(f.c.view(k.id).error, /record unavailable/u);
+});
+test("遅れて届いた旧PR画像も短縮表示の照合履歴に含める", async (t) => {
+  const f = fixture(t),
+    k = f.key();
+  let release,
+    delivered = false;
+  const original = k.setImage;
+  k.setImage = async (image) => {
+    if (!delivered && decodeURIComponent(image).includes("#1")) {
+      delivered = true;
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+    }
+    await original(image);
+  };
+  f.data({ rows: [{ ...pr(1), repo: "acme/aaaaaaaaaa111111aaaaaaaaaa" }] });
+  await f.bind(k, { handoff: "send" });
+  assert.equal(typeof release, "function");
+  f.data({ rows: [{ ...pr(1), repo: "acme/aaaaaaaaaa222222aaaaaaaaaa" }] });
+  await f.c.refresh(k.id);
+  release();
+  await tick();
+  await tick();
+  await f.c.press(k.id);
+  assert.deepEqual(f.effects, []);
+  assert.match(f.c.view(k.id).error, /表示|照合/u);
+});
+
+test("旧画像が届いた可能性のある送信失敗も同表示の別PRへ切り替えない", async (t) => {
+  const f = fixture(t),
+    k = f.key();
+  let reject,
+    started = false;
+  const original = k.setImage;
+  k.setImage = async (image) => {
+    if (!started && decodeURIComponent(image).includes("#1")) {
+      started = true;
+      await new Promise((_, fail) => {
+        reject = fail;
+      });
+    }
+    await original(image);
+  };
+  f.data({ rows: [{ ...pr(1), repo: "acme/aaaaaaaaaa111111aaaaaaaaaa" }] });
+  await f.bind(k);
+  f.data({ rows: [{ ...pr(1), repo: "acme/aaaaaaaaaa222222aaaaaaaaaa" }] });
+  await f.c.refresh(k.id);
+  reject(Error("write outcome unknown"));
+  await tick();
+  await tick();
+  await f.c.press(k.id);
+  assert.deepEqual(f.effects, []);
+  assert.match(f.c.view(k.id).error, /表示|照合/u);
 });

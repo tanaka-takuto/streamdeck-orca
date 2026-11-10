@@ -94,6 +94,7 @@ export class ActiveAiInput {
       directory.workspace.id,
       directory.workspace,
       directory.snapshot.workspaces,
+      "input",
     );
     if (
       directory.snapshot.truncated ||
@@ -150,6 +151,7 @@ export class ActiveAiInput {
       directory.workspace.id,
       directory.workspace,
       directory.snapshot.workspaces,
+      "input",
     );
     const target = directory.targets.filter(
       (row) => row.handle === displayed.target.handle,

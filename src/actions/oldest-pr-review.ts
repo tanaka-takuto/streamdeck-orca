@@ -7,8 +7,8 @@ import streamDeck, {
   type WillAppearEvent,
   type WillDisappearEvent,
 } from "@elgato/streamdeck";
-import { prKey } from "../github/reviews";
 import { OldestPRController } from "../oldest-pr-controller";
+import { latestReviewRecord } from "../orca/review-launcher";
 import {
   readReviewRecords,
   reviewGitHub,
@@ -16,7 +16,13 @@ import {
 } from "../pr-review-runtime";
 import type { ReviewSettings } from "../pr-review-settings";
 
-const controller = new OldestPRController(reviewGitHub, reviewLauncher);
+const controller = new OldestPRController(
+  reviewGitHub,
+  reviewLauncher,
+  30000,
+  async (accountId, pr) =>
+    latestReviewRecord(await readReviewRecords(), accountId, pr),
+);
 streamDeck.devices.onDeviceDidDisconnect((ev) =>
   controller.disconnect(ev.device.id),
 );
@@ -75,13 +81,11 @@ export class OldestPRReviewAction extends SingletonAction<ReviewSettings> {
       candidate = view.candidate;
     const previous =
       candidate && view.accountId
-        ? Object.values(await readReviewRecords())
-            .filter(
-              (r) =>
-                r.accountId === view.accountId &&
-                prKey(r.pr) === prKey(candidate),
-            )
-            .sort((a, b) => b.at - a.at)[0]
+        ? latestReviewRecord(
+            await readReviewRecords(),
+            view.accountId,
+            candidate,
+          )
         : undefined;
     const current = controller.view(id);
     if (

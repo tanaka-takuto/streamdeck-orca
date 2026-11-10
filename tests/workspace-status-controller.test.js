@@ -176,7 +176,7 @@ test("未割当は自動選択せず長押し保存確認後だけ登録し移�
     k = f.key("x", { custom: "keep" });
   await f.bind(k);
   assert.equal(k.settings.workspace, undefined);
-  assert.match(f.images.at(-1)[1], /長押しで登録/);
+  assert.match(f.images.at(-1)[1], /未割当/);
   f.setSelected("b");
   f.controller.down("x");
   await f.advance(700);
@@ -185,7 +185,7 @@ test("未割当は自動選択せず長押し保存確認後だけ登録し移�
   assert.equal(k.settings.workspace.workspaceId, "b");
   assert.equal(k.settings.custom, "keep");
   assert.deepEqual(f.effects, []);
-  assert.match(f.images.at(-1)[1], /登録完了/);
+  assert.match(f.images.at(-1)[1], /登録済/);
 });
 test("旧IDから各ボタンへ一度移行し再割当/再起動後も独立、globalは不変", async (t) => {
   const saved = {
@@ -323,7 +323,7 @@ test("無関係な最新設定を保持し、保存後の読戻し失敗では�
   assert.equal(k.settings.workspace.workspaceId, "a");
   assert.equal(k.settings.custom, "new");
   assert.equal(k.settings.extra, 42);
-  assert.doesNotMatch(f.images.at(-1)[1], /登録完了/);
+  assert.doesNotMatch(f.images.at(-1)[1], /登録済/);
 });
 test("保存直前に画面選択WSまたはruntimeが変われば旧割当を維持", async (t) => {
   const f = fixture(t),
@@ -377,7 +377,7 @@ test("保存済mainがあっても新規の空設定ボタンは未割当を保�
     k = f.key("new");
   await f.bind(k);
   assert.equal(k.settings.workspace, undefined);
-  assert.match(f.images.at(-1)[1], /長押しで登録/);
+  assert.match(f.images.at(-1)[1], /未割当/);
 });
 
 test("再割当後に旧リンクを消し、遅い旧WSの取得失敗から詳細を復活させない", async (t) => {

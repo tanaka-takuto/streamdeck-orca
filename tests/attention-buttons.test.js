@@ -35,17 +35,17 @@ test("確認先でも同名・同タグの対象を黙って開かず、完全ID
   await f.buttons.press("key");
   assert.deepEqual(f.opens, []);
   assert.match(f.errors[0] ?? "", /完全ID.*パス/u);
-  assert.match(decodeURIComponent(f.images.at(-1)), /表示重複/u);
+  assert.match(decodeURIComponent(f.images.at(-1)), /要照合/u);
 });
 
-test("空プロジェクトの代替表示が同名・同タグと重なるときも確認先を開かない", async () => {
+test("空プロジェクトも同じ表示になる同名対象を確認先で開かない", async () => {
   const f = fixture();
   f.set(
     state(
-      ["collision-11vsk8p-13317", "collision-1c0e837-25368"].map((id, i) => ({
+      ["collision-11vsk8p-13317", "collision-1c0e837-25368"].map((id) => ({
         ...w(id),
         name: "main",
-        project: i ? "未取得" : "",
+        project: "",
       })),
     ),
   );
@@ -158,8 +158,8 @@ test("候補を保持した押下が取得失敗しても、短い失敗見出�
   const press = f.buttons.press("key");
   await flush();
   const visible = decodeURIComponent(f.images.at(-1));
-  assert.match(visible, />取得できません<\/text>/u);
-  assert.match(visible, /Orcaで確認/u);
+  assert.match(visible, />取得失敗<\/text>/u);
+  assert.doesNotMatch(visible, /Orcaで確認/u);
   assert.doesNotMatch(visible, /開いています/u);
   assert.deepEqual(f.opens, []);
   finishAlert();
@@ -234,7 +234,7 @@ test("遅れた旧画像が見えている間に、その前の別対象を開�
     id: "key",
     async setImage(image) {
       if (slow) await new Promise((resolve) => pending.push(resolve));
-      visible = decodeURIComponent(image).match(/y="69"[^>]*>([^<]*)</u)?.[1];
+      visible = decodeURIComponent(image).match(/y="81.5"[^>]*>([^<]*)</u)?.[1];
     },
     async showAlert() {},
   });

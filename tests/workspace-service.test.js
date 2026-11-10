@@ -136,5 +136,5 @@ test("新規ボタンはglobalを読まず、旧mainや先頭WSを自動割当�
   await tick();
   assert.equal(settings.workspace, undefined);
   assert.equal(settings.workspaceButtonVersion, 1);
-  assert.match(f.visible, /長押しで登録/u);
+  assert.match(f.visible, /未割当/u);
 });
