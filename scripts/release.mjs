@@ -111,21 +111,27 @@ export function publishRelease(meta, { gh = runGh, directory = "dist" } = {}) {
   const latest = get("/releases/latest", true);
   const promote = !latest || newerThan(meta.version, latest.tag_name);
   const common = [meta.tag, "--repo", meta.repository];
-  if (!existing)
+  // Use the creation receipt: list indexes can lag behind the successful POST.
+  const draft =
+    existing ??
     gh([
-      "release",
-      "create",
-      ...common,
-      "--target",
-      meta.sha,
-      "--draft",
-      "--latest=false",
-      "--title",
-      `Orca ${meta.version}`,
-      "--notes-file",
-      join(directory, "release-notes.md"),
+      "api",
+      `repos/${meta.repository}/releases`,
+      "--method",
+      "POST",
+      "-f",
+      `tag_name=${meta.tag}`,
+      "-f",
+      `target_commitish=${meta.sha}`,
+      "-f",
+      `name=Orca ${meta.version}`,
+      "-F",
+      "draft=true",
+      "-f",
+      "make_latest=false",
+      "-F",
+      `body=@${join(directory, "release-notes.md")}`,
     ]);
-  const draft = existing ?? findRelease();
   if (
     !Number.isSafeInteger(draft?.id) ||
     draft.id <= 0 ||

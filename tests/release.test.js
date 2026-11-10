@@ -70,6 +70,17 @@ function fixture({
     if (args[0] === "api") {
       if (failRead) throw new Error("permission denied");
       const route = args[1].replace(`repos/${input.repository}`, "");
+      if (route === "/releases" && args.includes("POST")) {
+        mutations.push("create");
+        release = {
+          id: 1,
+          tag_name: "v0.8.0.12",
+          draft: true,
+          target_commitish: sha,
+          assets: [],
+        };
+        return structuredClone(release);
+      }
       if (!route) return { default_branch: "main" };
       if (route === "/commits/main") return { sha: head };
       if (route === "/releases/latest")
@@ -84,14 +95,6 @@ function fixture({
       throw new Error(`Unexpected route ${route}`);
     }
     mutations.push(args[1]);
-    if (args[1] === "create")
-      release = {
-        id: 1,
-        tag_name: "v0.8.0.12",
-        draft: true,
-        target_commitish: sha,
-        assets: [],
-      };
     if (args[1] === "upload") {
       if (failUpload) throw new Error("upload failed");
       release.assets = [
@@ -127,6 +130,21 @@ test("成果物2個をdraftへアップロードしてから指定SHAのRelease�
   assert.equal(f.release.draft, false);
   assert.equal(f.release.target_commitish, sha);
   assert.equal(f.latest, "v0.8.0.12");
+});
+test("新規draftが一覧に反映される前でも作成応答のIDで公開を完了する", () => {
+  const f = fixture();
+  let listReads = 0;
+  const gh = (args, ...rest) => {
+    if (args[0] === "api" && args[1].endsWith("/releases?per_page=100")) {
+      ++listReads;
+      return [[]];
+    }
+    return f.gh(args, ...rest);
+  };
+  publishRelease(releaseMetadata(input), { gh });
+  assert.equal(f.release.draft, false);
+  assert.equal(listReads, 1);
+  assert.deepEqual(f.mutations, ["create", "upload", "edit"]);
 });
 test("公開済み版の再実行ではassetを変更せず、失敗したdraftは回復する", () => {
   const uploaded = [
@@ -227,7 +245,11 @@ test("CLIは実行とartifactを照合し、404だけを未作成として公開
 const fs=require('node:fs'), a=process.argv.slice(2), state=fs.existsSync('state.json')?JSON.parse(fs.readFileSync('state.json')):null;
 if(a[0]==='api') {
   const route=a[1].replace('repos/${input.repository}','');
-  if(!route) console.log(JSON.stringify({default_branch:'main'}));
+  if(route==='/releases'&&a.includes('POST')) {
+    const release={id:1,tag_name:'v0.8.0.12',draft:true,target_commitish:'${sha}',assets:[]};
+    fs.appendFileSync('effects.log','create\\n');fs.writeFileSync('state.json',JSON.stringify(release));console.log(JSON.stringify(release));
+  }
+  else if(!route) console.log(JSON.stringify({default_branch:'main'}));
   else if(route==='/commits/main') console.log(JSON.stringify({sha:'${sha}'}));
   else if(route.startsWith('/releases/tags/')&&state&&!state.draft) console.log(JSON.stringify(state));
   else if(route==='/releases?per_page=100') console.log(JSON.stringify(state?[[state]]:[[]]));
@@ -235,7 +257,6 @@ if(a[0]==='api') {
   else {console.log(JSON.stringify({message:'Not Found',status:'404'}));process.exit(1);}
 } else {
   fs.appendFileSync('effects.log',a[1]+'\\n');
-  if(a[1]==='create') fs.writeFileSync('state.json',JSON.stringify({id:1,tag_name:'v0.8.0.12',draft:true,target_commitish:'${sha}',assets:[]}));
   if(a[1]==='upload') {state.assets=['${meta.asset}','SHA256SUMS'].map(name=>({name,state:'uploaded',size:10}));fs.writeFileSync('state.json',JSON.stringify(state));}
   if(a[1]==='edit') {state.draft=false;fs.writeFileSync('state.json',JSON.stringify(state));}
 }
