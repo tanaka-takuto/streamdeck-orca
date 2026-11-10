@@ -147,6 +147,11 @@ const args = process.argv.slice(2);
 const data = JSON.parse(fs.readFileSync(${JSON.stringify(dataPath)}, 'utf8'));
 if(args[0] === 'file'){fs.appendFileSync(${JSON.stringify(executionsPath)},JSON.stringify(args)+'\\n');console.log(JSON.stringify({ok:true,_meta:data._meta,result:{opened:true,kind:'text'}}));}
 else if (args[0] === 'status') console.log(JSON.stringify({ok:true,_meta:data._meta,result:{app:{running:true,desktopWindowStatus:'available'}}}));
+else if (args[0] === 'reference' && args[1] === 'list') {
+ const id = args[args.indexOf('--worktree') + 1].slice(3);
+ const row = data.result.worktrees.find(w => w.worktreeId === id);
+ console.log(JSON.stringify({ok:true,_meta:data._meta,result:{worktree:{id,hostId:row?.hostId,instanceId:row?.instanceId},references:data.testReferences?.[id]??[]}}));
+}
 else if (args[0] === 'worktree') setTimeout(() => console.log(JSON.stringify(data)), data.testDelayMs || 0);
 else if (args[1] === 'list') {
  const id = args[args.indexOf('--worktree') + 1].slice(3);
@@ -543,6 +548,76 @@ test("SDK長押しはAIなしの画面選択WSを登録し移動せず他ボタ�
       m.event === "sendToPropertyInspector" && m.payload.requestId === "mirror",
   );
   assert.equal(view.payload.workspace.workspaceId, "a");
+  assert.deepEqual(f.switches(), []);
+  assert.deepEqual(f.executions(), []);
+});
+
+test("SDKダブルで割当WSのPRとIssueを全件開き、旧選択messageと設定確認だけでは開かない", async (t) => {
+  const f = await fixture(t),
+    snap = snapshot(["a", "b"]);
+  const refs = [
+    {
+      provider: "github",
+      type: "issue",
+      key: "issue",
+      url: "https://github.com/acme/app/issues/1",
+      selected: true,
+    },
+    {
+      provider: "github",
+      type: "pr",
+      key: "p2",
+      url: "https://github.com/acme/app/pull/2",
+    },
+    {
+      provider: "github",
+      type: "pr",
+      key: "p3",
+      url: "https://github.com/acme/app/pull/3",
+    },
+  ];
+  snap.testReferences = { a: [...refs, { ...refs[1], key: "dup" }] };
+  f.setSnapshot(snap);
+  f.appear("batch", "key", undefined, {
+    workspaceButtonVersion: 1,
+    workspace: { workspaceId: "a", workspaceName: "A" },
+    reference: {
+      workspaceId: "a",
+      key: "deleted",
+      url: "https://github.com/acme/app/pull/99",
+    },
+  });
+  await f.wait(imageContains("batch", "A"));
+  f.send("propertyInspectorDidAppear", "batch", "key");
+  f.send("sendToPlugin", "batch", "key", {
+    type: "select-reference",
+    requestId: "old-choice",
+    workspaceId: "a",
+    key: "p2",
+    revision: "obsolete",
+  });
+  f.send("sendToPlugin", "batch", "key", {
+    type: "get-workspace-button",
+    requestId: "all-links",
+  });
+  const view = await f.wait(
+    (m) =>
+      m.event === "sendToPropertyInspector" &&
+      m.payload.requestId === "all-links",
+  );
+  assert.equal(view.payload.references.length, 3);
+  assert.deepEqual(
+    f.history.filter((m) => m.event === "openUrl"),
+    [],
+  );
+  f.setActiveSelection("b");
+  for (const event of ["keyDown", "keyUp", "keyDown", "keyUp"])
+    f.send(event, "batch", "key");
+  await f.wait((m) => m.event === "openUrl" && m.payload.url === refs[2].url);
+  assert.deepEqual(
+    f.history.filter((m) => m.event === "openUrl").map((m) => m.payload.url),
+    refs.map((r) => r.url),
+  );
   assert.deepEqual(f.switches(), []);
   assert.deepEqual(f.executions(), []);
 });

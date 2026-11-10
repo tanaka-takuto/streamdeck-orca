@@ -81,7 +81,7 @@
       "Name": "ワークスペースの状態",
       "UUID": "com.tanaka-takuto.orca.workspace-status",
       "Icon": "imgs/action-icon",
-      "Tooltip": "短押しで割当WSへ移動（500ms待ち）。ダブルで関連Issue/PR、700ms長押しでOrcaの選択WSをこのボタンに登録。",
+      "Tooltip": "短押しで割当WSへ移動（500ms待ち）。ダブルで割当WSの関連PR/Issueを全件開き、700ms長押しでOrcaの選択WSをこのボタンに登録。",
       "PropertyInspectorPath": "ui/workspace-status.html",
       "Controllers": ["Keypad"],
       "States": [

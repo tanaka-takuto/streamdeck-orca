@@ -2,10 +2,10 @@ import type { OrcaClient } from "./orca/client";
 import { getWorkspaceStatus, type OrcaWorkspace } from "./orca/model";
 import type { WorkspaceMonitor } from "./orca/monitor";
 import {
-  chooseReference,
-  referenceCandidates,
+  allReferences,
+  referenceSet,
   type SavedReference,
-  type WorkspaceReference,
+  type WorkspaceReferences,
 } from "./orca/workspace-references";
 import type { PluginSettings } from "./plugin-settings";
 import { WorkspaceButtons, type WorkspaceKey } from "./workspace-buttons";
@@ -33,6 +33,16 @@ type Key = WorkspaceKey & {
   getSettings(): Promise<WorkspaceButtonSettings>;
   setSettings(settings: WorkspaceButtonSettings): Promise<void>;
 };
+type LinkResult = {
+  workspaceId: string;
+  workspaceName: string;
+  requested: string[];
+  unconfirmed: { url: string; reason: string }[];
+  notRequested: string[];
+  cancelled: boolean;
+  inProgress: boolean;
+  total: number;
+};
 type Binding = {
   key: Key;
   settings: WorkspaceButtonSettings;
@@ -46,6 +56,7 @@ type Binding = {
   notice?: string;
   operating?: boolean;
   pressReady?: boolean;
+  linkResult?: LinkResult;
 };
 type Client = Pick<
   OrcaClient,
@@ -253,6 +264,8 @@ export class WorkspaceStatusController {
         );
       }
       if (!current()) throw new Error("登録操作を中止しました。");
+      if (!same(b.settings.workspace, confirmed.workspace))
+        b.linkResult = undefined;
       b.settings = confirmed;
       b.error = undefined;
       this.draw(b);
@@ -285,9 +298,13 @@ export class WorkspaceStatusController {
     if (b.operating) return;
     b.operating = true;
     b.notice = undefined;
+    if (kind === "double") {
+      b.linkResult = undefined;
+      b.error = undefined;
+    }
     const navigationCurrent =
       kind === "long" ? () => true : this.beginNavigation();
-    const runtimeId = b.runtimeId;
+    let runtimeId = b.runtimeId;
     const current = () =>
       this.current(b) &&
       gestureCurrent() &&
@@ -306,6 +323,8 @@ export class WorkspaceStatusController {
           throw new Error(
             "Orca の実行環境が変わりました。元の割当を維持します。",
           );
+        runtimeId = selected.runtimeId;
+        if (!current()) return;
         const next = {
           ...b.settings,
           workspaceButtonVersion: 1,
@@ -351,7 +370,9 @@ export class WorkspaceStatusController {
       if (!current()) return;
       if (runtimeId && runtimeId !== snapshot.runtimeId)
         throw new Error("Orca の実行環境が変わりました。");
-      this.checkWorkspace(assignment, snapshot.workspaces);
+      runtimeId = snapshot.runtimeId;
+      if (!current()) return;
+      const workspace = this.checkWorkspace(assignment, snapshot.workspaces);
       if (kind === "short") {
         await this.client.focusWorkspace(
           assignment.workspaceId,
@@ -370,27 +391,87 @@ export class WorkspaceStatusController {
           snapshot.runtimeId,
         );
         if (!current()) return;
-        const ref = chooseReference(data, b.settings.reference);
-        // Last read also verifies the runtime after a slow reference lookup.
-        const check = await this.client.snapshot();
-        if (!current()) return;
-        if (check.runtimeId !== snapshot.runtimeId)
-          throw new Error("Orca の実行環境が変わりました。");
-        this.checkWorkspace(assignment, check.workspaces);
+        this.checkReferences(data, workspace);
+        const refs = allReferences(data);
+        if (!refs.length)
+          throw new Error(
+            "関連先なし：このWSにGitHubのPR / Issueがありません。",
+          );
         const finalData = await this.client.references(
           assignment.workspaceId,
           snapshot.runtimeId,
         );
         if (!current()) return;
-        const finalRef = chooseReference(finalData, b.settings.reference);
-        if (finalRef.key !== ref.key || finalRef.url !== ref.url)
+        this.checkReferences(finalData, workspace);
+        if (referenceSet(allReferences(finalData)) !== referenceSet(refs))
           throw new Error(
-            "関連先が変わりました。表示を確認してもう一度操作してください。",
+            "関連先が変わりました。更新後にもう一度操作してください。",
           );
-        await this.openUrl(ref.url);
-        if (current()) {
-          b.error = undefined;
-          this.feedback(b, "関連先を開いた", true);
+        // Validate the WS after the last reference response, including a recreated instance.
+        const check = await this.client.snapshot();
+        if (!current()) return;
+        if (check.runtimeId !== snapshot.runtimeId)
+          throw new Error("Orca の実行環境が変わりました。");
+        this.checkReferences(
+          finalData,
+          this.checkWorkspace(assignment, check.workspaces),
+        );
+        const result: LinkResult = {
+          workspaceId: assignment.workspaceId,
+          workspaceName: assignment.workspaceName,
+          requested: [],
+          unconfirmed: [],
+          notRequested: [],
+          cancelled: false,
+          inProgress: true,
+          total: refs.length,
+        };
+        b.linkResult = result;
+        this.feedback(b, "関連先を送信中");
+        for (const [index, ref] of refs.entries()) {
+          if (!current()) {
+            result.notRequested = refs.slice(index).map((row) => row.url);
+            break;
+          }
+          try {
+            await this.openUrl(ref.url);
+            result.requested.push(ref.url);
+          } catch (error) {
+            result.unconfirmed.push({
+              url: ref.url,
+              reason:
+                error instanceof Error
+                  ? error.message
+                  : "起動要求の結果を確認できません。",
+            });
+          }
+        }
+        result.inProgress = false;
+        result.cancelled = !current();
+        if (this.current(b)) {
+          b.notice = `${assignment.workspaceName}：関連先${refs.length}件中${result.requested.length}件の起動要求をブラウザーへ送信しました。`;
+          if (result.unconfirmed.length || result.cancelled) {
+            b.error = [
+              b.notice,
+              result.unconfirmed.length
+                ? `${result.unconfirmed.length}件は要求の結果を確認できません。自動再送はしません。`
+                : "",
+              result.cancelled
+                ? `操作を中止しました。${result.notRequested.length}件は未送信です。送信済みの要求は取り消していません。`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            this.report(b.key.id, b.error);
+            this.feedback(
+              b,
+              result.unconfirmed.length ? "リンク結果不明" : "リンク送信中止",
+            );
+            await b.key.showAlert().catch(() => {});
+          } else {
+            b.error = undefined;
+            if (current()) this.feedback(b, "関連先を開いた", true);
+          }
         }
       }
     } catch (error) {
@@ -399,6 +480,17 @@ export class WorkspaceStatusController {
     } finally {
       b.operating = false;
     }
+  }
+  private checkReferences(
+    data: WorkspaceReferences,
+    workspace: OrcaWorkspace,
+  ): void {
+    if (
+      data.workspaceId !== workspace.id ||
+      (workspace.instanceId && data.instanceId !== workspace.instanceId) ||
+      (workspace.hostId && data.hostId !== workspace.hostId)
+    )
+      throw new Error("関連先の対象WS・実体・実行ホストを確認できません。");
   }
   private checkWorkspace(
     assignment: ButtonWorkspace,
@@ -427,9 +519,10 @@ export class WorkspaceStatusController {
     const ws = state.snapshot?.workspaces.find(
       (row) => row.id === assignment?.workspaceId,
     );
-    const base = {
+    const base = () => ({
       revision,
       notice: b.notice,
+      linkResult: b.linkResult,
       workspaceName: ws?.name ?? assignment?.workspaceName ?? "未割当",
       workspace: assignment,
       workspaceIdentity: workspaceIdentity(
@@ -441,9 +534,9 @@ export class WorkspaceStatusController {
       error: b.error ?? state.error,
       settings: b.settings,
       ready: b.ready && !b.operating,
-    };
+    });
     if (!assignment || !state.snapshot || state.error)
-      return { ...base, candidates: [] };
+      return { ...base(), references: [] };
     try {
       this.checkWorkspace(assignment, state.snapshot.workspaces);
       const data = await this.client.references(
@@ -455,18 +548,32 @@ export class WorkspaceStatusController {
         revision !== JSON.stringify(targetFields(b.settings))
       )
         return undefined;
-      let linkError: string | undefined;
-      let chosen: WorkspaceReference | undefined;
-      try {
-        chosen = chooseReference(data, b.settings.reference);
-      } catch (error) {
-        linkError = (error as Error).message;
-      }
+      const latest = this.monitor.state;
+      if (
+        latest.error ||
+        !latest.snapshot ||
+        latest.snapshot.runtimeId !== state.snapshot.runtimeId
+      )
+        return {
+          ...base(),
+          ready: false,
+          status: "unknown",
+          references: [],
+          error:
+            latest.error ??
+            "Orcaの実行環境が変わりました。関連先を更新してください。",
+        };
+      this.checkReferences(
+        data,
+        this.checkWorkspace(assignment, latest.snapshot.workspaces),
+      );
+      const references = allReferences(data);
       return {
-        ...base,
-        candidates: referenceCandidates(data),
-        chosen,
-        linkError,
+        ...base(),
+        references,
+        linkError: references.length
+          ? undefined
+          : "関連先なし：このWSにGitHubのPR / Issueがありません。",
       };
     } catch (error) {
       if (
@@ -474,60 +581,7 @@ export class WorkspaceStatusController {
         revision !== JSON.stringify(targetFields(b.settings))
       )
         return undefined;
-      return { ...base, candidates: [], linkError: (error as Error).message };
-    }
-  }
-  async selectReference(
-    id: string,
-    workspaceId: string,
-    key: string,
-    revision?: string,
-  ): Promise<void> {
-    const b = this.bindings.get(id);
-    if (
-      !b?.ready ||
-      b.operating ||
-      b.settings.workspace?.workspaceId !== workspaceId
-    )
-      return;
-    if (
-      revision !== undefined &&
-      revision !== JSON.stringify(targetFields(b.settings))
-    ) {
-      this.fail(
-        b,
-        new Error(
-          "ボタンの割当または関連先設定が変わりました。最新の表示から選び直してください。",
-        ),
-      );
-      return;
-    }
-    b.operating = true;
-    b.gesture.cancel();
-    const current = () =>
-      this.current(b) && b.settings.workspace?.workspaceId === workspaceId;
-    try {
-      const view = await this.view(id);
-      if (!current()) return;
-      const ref = view?.candidates.find((row) => row.key === key);
-      if (!ref)
-        throw new Error("選択先消失：最新の関連先から選び直してください。");
-      await this.save(
-        b,
-        {
-          ...b.settings,
-          reference: { workspaceId, key: ref.key, url: ref.url },
-        },
-        current,
-      );
-      if (current()) {
-        b.notice = "関連先を保存しました。";
-        this.feedback(b, "関連先を保存", true);
-      }
-    } catch (error) {
-      if (current()) this.fail(b, error, "保存失敗");
-    } finally {
-      b.operating = false;
+      return { ...base(), references: [], linkError: (error as Error).message };
     }
   }
 }

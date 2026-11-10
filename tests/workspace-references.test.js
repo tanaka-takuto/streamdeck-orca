@@ -5,7 +5,7 @@ import { loadModule } from "./helpers/load-module.js";
 const { parseWorkspaceSelection } = await loadModule(
   "src/orca/active-selection.ts",
 );
-const { parseReferences, chooseReference } = await loadModule(
+const { parseReferences, allReferences } = await loadModule(
   "src/orca/workspace-references.ts",
 );
 const response = (refs) => ({
@@ -49,39 +49,69 @@ test("画面選択WSはタブ/AIに依存せずcwdの行を選ばない", () => 
   raw.result.truncated = true;
   assert.throws(() => parseWorkspaceSelection(raw));
 });
-test("Issue/PR優先・Orca選択・複数候補・消失・無関連を区別", () => {
+test("Orca選択中参照によらずPRとIssueを全件、同一URLは一件にまとめる", () => {
   const read = (refs) => parseReferences(response(refs), "a", "r");
-  assert.equal(chooseReference(read([ref(1, "issue")])).key, "k1");
-  assert.equal(chooseReference(read([ref(2)])).key, "k2");
-  assert.equal(chooseReference(read([ref(1, "issue"), ref(2)])).key, "k2");
-  assert.equal(
-    chooseReference(read([ref(1, "issue", true), ref(2)])).key,
-    "k1",
+  const refs = allReferences(
+    read([
+      ref(1, "issue", true),
+      ref(2),
+      ref(3),
+      {
+        ...ref(2),
+        key: "duplicate",
+        url: "https://github.com/ACME/APP/pull/2",
+      },
+      {
+        provider: "linear",
+        type: "issue",
+        key: "other",
+        url: "https://linear.app/acme/issue/A-1",
+        selected: true,
+      },
+    ]),
   );
-  assert.throws(() => chooseReference(read([ref(2), ref(3)])), /複数/);
+  assert.deepEqual(
+    refs.map((r) => r.url),
+    [ref(1, "issue").url, ref(2).url, ref(3).url],
+  );
+  assert.deepEqual(allReferences(read([])), []);
+});
+test("不正なGitHub対象や不完全な取得では、正常な関連先だけに黙って減らさない", () => {
+  for (const bad of [
+    { ...ref(2), url: "https://evil.example/x" },
+    { ...ref(2), key: "" },
+    { ...ref(2), url: ref(2, "issue").url },
+  ]) {
+    assert.throws(
+      () => parseReferences(response([ref(1), bad]), "a", "r"),
+      /関連先/u,
+    );
+  }
+  assert.throws(
+    () =>
+      parseReferences(
+        {
+          ...response([ref(1)]),
+          result: { ...response([ref(1)]).result, truncated: true },
+        },
+        "a",
+        "r",
+      ),
+    /関連先/u,
+  );
+  assert.throws(() => parseReferences(response([ref(2)]), "b", "r"));
+  assert.throws(() => parseReferences(response([ref(2)]), "a", "different"));
   assert.equal(
-    chooseReference(read([ref(2), ref(3)]), {
-      workspaceId: "a",
-      key: "k3",
-      url: ref(3).url,
-    }).key,
-    "k3",
+    allReferences(parseReferences(response([ref(2), ref(2)]), "a", "r")).length,
+    1,
   );
   assert.throws(
     () =>
-      chooseReference(read([ref(2)]), {
-        workspaceId: "a",
-        key: "k3",
-        url: ref(3).url,
-      }),
-    /消失/,
-  );
-  assert.throws(() => chooseReference(read([])), /関連先なし/);
-  assert.throws(() => parseReferences(response([ref(2)]), "b", "r"));
-  assert.throws(() => parseReferences(response([ref(2)]), "a", "different"));
-  assert.throws(() =>
-    chooseReference(
-      read([{ ...ref(2), url: "https://evil.example/x", selected: true }]),
-    ),
+      parseReferences(
+        response([ref(2), { ...ref(3), key: ref(2).key }]),
+        "a",
+        "r",
+      ),
+    /重複/u,
   );
 });

@@ -1,18 +1,19 @@
 import { object, readResponse } from "./model";
+/** Legacy per-button choice; retained only to preserve old settings until reassignment. */
 export type SavedReference = { workspaceId: string; key: string; url: string };
 export type WorkspaceReference = {
   key: string;
   url: string;
   type: "pr" | "issue";
-  selected: boolean;
   label: string;
 };
 export type WorkspaceReferences = {
   workspaceId: string;
   references: WorkspaceReference[];
-  unsupportedSelected: boolean;
+  instanceId?: string;
+  hostId?: string;
 };
-/** Orca 1.4.254 reference list: key and selected are explicit host-owned fields. */
+/** Orca 1.4.254 reference list, including the exact workspace instance and host. */
 export function parseReferences(
   value: unknown,
   workspaceId: string,
@@ -23,11 +24,12 @@ export function parseReferences(
   if (
     response.runtimeId !== runtimeId ||
     worktree.id !== workspaceId ||
-    !Array.isArray(response.result.references)
+    !Array.isArray(response.result.references) ||
+    response.result.truncated === true ||
+    response.result.incomplete === true
   )
     throw new Error("関連先の対象WS・実行環境を確認できません。");
   const references: WorkspaceReference[] = [];
-  let unsupportedSelected = false;
   for (const value of response.result.references) {
     const row = object(value);
     const match =
@@ -38,60 +40,51 @@ export function parseReferences(
         : null;
     if (
       row.provider !== "github" ||
-      (row.type !== "pr" && row.type !== "issue") ||
+      (row.type !== "pr" && row.type !== "issue")
+    )
+      continue;
+    if (
       typeof row.key !== "string" ||
       !row.key ||
       !match ||
       match[2] !== (row.type === "pr" ? "pull" : "issues")
-    ) {
-      unsupportedSelected ||= row.selected === true;
+    )
+      throw new Error("GitHub関連先のURLまたは識別子を確認できません。");
+    const previous = references.find((ref) => ref.key === row.key);
+    if (previous) {
+      if (
+        previous.type !== row.type ||
+        previous.url.toLowerCase() !== (row.url as string).toLowerCase()
+      )
+        throw new Error("関連先の識別子が重複し、URLが一致しません。");
       continue;
     }
-    if (references.some((ref) => ref.key === row.key))
-      throw new Error("関連先の識別子が重複しています。");
     references.push({
       key: row.key,
       url: row.url as string,
       type: row.type,
-      selected: row.selected === true,
       label: `${row.type === "pr" ? "PR" : "Issue"} #${match[3]} · ${match[1]}`,
     });
   }
-  return { workspaceId, references, unsupportedSelected };
+  const identity = object(worktree.identity ?? {});
+  const instance = worktree.instanceId ?? identity.instanceId;
+  const host = worktree.hostId ?? identity.executionHostId;
+  return {
+    workspaceId,
+    references,
+    instanceId: typeof instance === "string" ? instance : undefined,
+    hostId: typeof host === "string" ? host : undefined,
+  };
 }
-export function referenceCandidates(
-  data: WorkspaceReferences,
-): WorkspaceReference[] {
-  if (data.unsupportedSelected)
-    throw new Error(
-      "Orca の選択中参照は対応する GitHub Issue / PR ではありません。",
-    );
-  const selected = data.references.filter((ref) => ref.selected);
-  if (selected.length) return selected;
-  const prs = data.references.filter((ref) => ref.type === "pr");
-  return prs.length
-    ? prs
-    : data.references.filter((ref) => ref.type === "issue");
+/** Every supported saved link is opened; selection and legacy per-key choices do not filter it. */
+export function allReferences(data: WorkspaceReferences): WorkspaceReference[] {
+  const urls = new Set<string>();
+  return data.references.filter((ref) => {
+    const url = ref.url.toLowerCase();
+    if (urls.has(url)) return false;
+    urls.add(url);
+    return true;
+  });
 }
-export function chooseReference(
-  data: WorkspaceReferences,
-  saved?: SavedReference,
-): WorkspaceReference {
-  const existing =
-    saved && saved.workspaceId === data.workspaceId
-      ? data.references.find(
-          (ref) => ref.key === saved.key && ref.url === saved.url,
-        )
-      : undefined;
-  if (saved && !existing)
-    throw new Error(
-      "選択先消失：保存した関連先を確認できません。設定で選び直してください。",
-    );
-  const candidates = referenceCandidates(data);
-  if (!candidates.length)
-    throw new Error("関連先なし：このWSに GitHub Issue / PR がありません。");
-  if (candidates.length === 1) return candidates[0];
-  if (existing && candidates.some((ref) => ref.key === existing.key))
-    return existing;
-  throw new Error("関連先が複数：設定画面で対象を選んでください。");
-}
+export const referenceSet = (refs: WorkspaceReference[]): string =>
+  JSON.stringify(refs.map((ref) => ref.url.toLowerCase()).sort());

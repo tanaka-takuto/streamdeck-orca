@@ -115,10 +115,6 @@ function fixture() {
     click(id) {
       nodes.get(id).listeners.click();
     },
-    choose(key) {
-      nodes.get("reference").value = key;
-      nodes.get("reference").listeners.change();
-    },
   };
 }
 const ref = (n, label = `PR #${n}`) => ({
@@ -143,45 +139,90 @@ const view = (id = "A", extra = {}) => ({
   },
   revision: `rev-${id}`,
   ready: true,
-  candidates: [ref(1)],
-  chosen: ref(1),
+  references: [ref(1)],
   ...extra,
 });
-test("unique automatic reference does not stop advertised two-second refresh", () => {
+test("全件を選択欄なしで表示し、二秒の自動更新はブラウザー起動や保存をしない", () => {
   const f = fixture();
-  f.deliver(view());
+  f.deliver(view("A", { references: [ref(1), ref(2)] }));
+  assert.equal(f.nodes.get("references").children.length, 2);
+  assert.match(f.nodes.get("references").children[1].textContent, /pull\/2/u);
+  assert.match(f.nodes.get("link-status").textContent, /2件/u);
+  assert.doesNotMatch(
+    readFileSync(`${base}.html`, "utf8"),
+    /<select|id="save-reference"/u,
+  );
   const before = f.sent.length;
   f.poll();
   assert.ok(f.sent.length > before);
+  assert.ok(
+    f.sent
+      .filter((m) => m.event === "sendToPlugin")
+      .every((m) => m.payload.type === "get-workspace-button"),
+  );
+  assert.ok(f.sent.every((m) => m.event !== "setSettings"));
 });
-test("unsaved choice is preserved for same WS but reset across reassignment", () => {
+test("関連先なしと取得失敗を区別し、再割当中は以前のWSの一覧を見せない", () => {
   const f = fixture();
-  f.deliver(view("A", { candidates: [ref(1), ref(2)] }));
-  f.choose("p2");
-  f.settings(view("A").settings);
-  f.deliver(view("A", { candidates: [ref(1), ref(2)] }));
-  assert.equal(f.nodes.get("reference").value, "p2");
+  f.deliver(view("A"));
   f.settings(view("B").settings);
-  f.deliver(view("B", { candidates: [ref(1), ref(2, "Different B ref")] }));
-  assert.equal(f.nodes.get("reference").value, "p1");
+  assert.equal(f.nodes.get("references").children.length, 0);
+  f.deliver(view("B", { references: [], linkError: "関連先なし" }));
+  assert.match(f.nodes.get("link-status").textContent, /関連先なし/u);
+  f.poll();
+  f.deliver(
+    view("B", { references: [], linkError: "取得失敗：応答を確認できません" }),
+  );
+  assert.match(f.nodes.get("link-status").textContent, /取得失敗/u);
 });
-test("obsolete request cannot resurrect old path or reference", () => {
+test("古い応答から前のWS一覧を復活させず、切断時にも完全参照を消す", () => {
   const f = fixture(),
     old = f.request();
   f.settings(view("B").settings);
   f.deliver(view("A"), old);
   assert.ok(!f.nodes.get("workspace-identity").textContent.includes("/A"));
   f.deliver(view("B"));
-  assert.match(f.nodes.get("workspace-identity").textContent, /\/B/);
-});
-test("close disables links and clears confirmed path/reference information", () => {
-  const f = fixture();
-  f.deliver(view());
   f.close();
-  assert.equal(f.nodes.get("reference").disabled, true);
-  assert.equal(f.nodes.get("save-reference").disabled, true);
-  assert.ok(!f.nodes.get("workspace-identity").textContent.includes("/A"));
-  assert.ok(
-    !f.nodes.get("link-status").textContent.includes("https://github.com"),
+  assert.equal(f.nodes.get("references").children.length, 0);
+  assert.equal(f.nodes.get("refresh").disabled, true);
+  assert.ok(!f.nodes.get("workspace-identity").textContent.includes("/B"));
+});
+test("ブラウザー要求済み・結果不明・中止で未送信をURL付きで区別する", () => {
+  const f = fixture();
+  f.deliver(
+    view("A", {
+      linkResult: {
+        workspaceId: "A",
+        workspaceName: "WS A",
+        requested: [ref(1).url],
+        unconfirmed: [{ url: ref(2).url, reason: "reply lost" }],
+        notRequested: [ref(3).url],
+      },
+    }),
   );
+  const text = f.nodes.get("link-result").textContent;
+  assert.match(text, /要求済み.*1件/u);
+  assert.match(text, /結果不明.*1件/u);
+  assert.match(text, /未送信.*1件/u);
+  for (const n of [1, 2, 3]) assert.ok(text.includes(ref(n).url));
+  assert.doesNotMatch(text, /読込完了|表示完了/u);
+});
+
+test("進行中の起動要求を0件の完了結果と混同しない", () => {
+  const f = fixture();
+  f.deliver(
+    view("A", {
+      ready: false,
+      linkResult: {
+        workspaceId: "A",
+        workspaceName: "WS A",
+        total: 3,
+        inProgress: true,
+        requested: [],
+        unconfirmed: [],
+        notRequested: [],
+      },
+    }),
+  );
+  assert.match(f.nodes.get("link-result").textContent, /起動要求中.*0.*3/u);
 });

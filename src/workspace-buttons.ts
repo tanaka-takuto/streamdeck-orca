@@ -62,7 +62,10 @@ const feedbackLabels: Record<string, [string, KeyIcon]> = {
   登録完了: ["登録済", "check"],
   移動中: ["移動中", "spinner"],
   関連先を取得中: ["関連取得", "spinner"],
+  関連先を送信中: ["要求中", "spinner"],
   関連先を開いた: ["リンク", "link"],
+  リンク結果不明: ["結果不明", "question"],
+  リンク送信中止: ["中止", "pause"],
   関連先を保存: ["保存済", "link"],
   長押しで登録: ["未割当", "plus"],
   保存結果不明: ["保存不明", "question"],
@@ -88,7 +91,8 @@ export function keyImage(
       ? (feedbackLabels[feedback] ?? [shorten(feedback, 8), "warning" as const])
       : [style.label, style.icon];
   const color =
-    context?.ambiguous || (feedback && /失敗|不明|消失|変更/u.test(feedback))
+    context?.ambiguous ||
+    (feedback && /失敗|不明|消失|変更|中止/u.test(feedback))
       ? keyColors.error
       : style.color;
   return keyFrame(

@@ -41,28 +41,13 @@ export class WorkspaceStatusAction extends SingletonAction<WorkspaceButtonSettin
       {
         type: string;
         requestId: string;
-        workspaceId?: string;
-        key?: string;
-        revision?: string;
       },
       WorkspaceButtonSettings
     >,
   ): Promise<void> {
     const message = ev.payload;
     if (!message || typeof message.requestId !== "string") return;
-    if (
-      message.type === "select-reference" &&
-      typeof message.workspaceId === "string" &&
-      typeof message.key === "string" &&
-      typeof message.revision === "string"
-    )
-      await workspaceService.status.selectReference(
-        ev.action.id,
-        message.workspaceId,
-        message.key,
-        message.revision,
-      );
-    else if (message.type !== "get-workspace-button") return;
+    if (message.type !== "get-workspace-button") return;
     const view = await workspaceService.status.view(ev.action.id);
     if (view && streamDeck.ui.action?.id === ev.action.id)
       await streamDeck.ui.sendToPropertyInspector({

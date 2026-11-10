@@ -26,7 +26,8 @@ function fixture(t, saved = {}) {
     delay,
     onWrite,
     selectionReader,
-    referenceReader;
+    referenceReader,
+    urlHandler;
   const listeners = new Set(),
     effects = [],
     images = [],
@@ -40,6 +41,7 @@ function fixture(t, saved = {}) {
     },
     error: null,
   };
+  const cliSnapshot = structuredClone(state.snapshot);
   const monitor = {
     state,
     subscribe(fn) {
@@ -48,7 +50,7 @@ function fixture(t, saved = {}) {
       return () => listeners.delete(fn);
     },
     async refresh() {
-      return state;
+      return monitor.state;
     },
   };
   const client = {
@@ -59,7 +61,7 @@ function fixture(t, saved = {}) {
         : { runtimeId, workspace: ws(selected) };
     },
     async snapshot() {
-      return { ...state.snapshot, runtimeId };
+      return { ...cliSnapshot, runtimeId };
     },
     async focusWorkspace(id, current) {
       if (delay) await delay;
@@ -71,6 +73,8 @@ function fixture(t, saved = {}) {
       if (delay) await delay;
       return {
         workspaceId: id,
+        instanceId: id,
+        hostId: "local",
         references: [
           {
             key: "ref",
@@ -120,7 +124,10 @@ function fixture(t, saved = {}) {
     monitor,
     client,
     async () => saved,
-    async (url) => effects.push(["url", url]),
+    async (url) => {
+      effects.push(["url", url]);
+      await urlHandler?.(url);
+    },
     (id, msg) => errors.push([id, msg]),
   );
   t.after(() => {
@@ -135,6 +142,9 @@ function fixture(t, saved = {}) {
     async bind(k, s = k.settings) {
       await controller.bind(k, s);
       await tick();
+    },
+    openUrl(fn) {
+      urlHandler = fn;
     },
     references(fn) {
       referenceReader = fn;
@@ -159,6 +169,14 @@ function fixture(t, saved = {}) {
     },
     slow(p) {
       delay = p;
+    },
+    monitorState(value) {
+      monitor.state = value;
+      for (const fn of listeners) fn(value);
+    },
+    monitorSnapshot(value) {
+      state.snapshot = value;
+      for (const fn of listeners) fn(state);
     },
     disconnect() {
       state.error = "offline";
@@ -362,13 +380,17 @@ test("保存中の関連先操作を溜めず表示と永続割当を一致さ�
   f.controller.down("x");
   await f.advance(700);
   f.controller.up("x");
-  await f.controller.selectReference("x", "a", "ref");
+  f.controller.down("x");
+  f.controller.up("x");
+  f.controller.down("x");
+  f.controller.up("x");
   release();
   await tick();
   assert.equal(
     (await f.controller.view("x")).workspace.workspaceId,
     k.settings.workspace.workspaceId,
   );
+  assert.deepEqual(f.effects, []);
 });
 test("保存済mainがあっても新規の空設定ボタンは未割当を保つ", async (t) => {
   const f = fixture(t, {
@@ -411,3 +433,304 @@ test("再割当後に旧リンクを消し、遅い旧WSの取得失敗から詳
   reject(Error("old WS offline"));
   assert.equal(await pending, undefined);
 });
+
+const batchRefs = (id = "a", numbers = [1, 2, 3]) => ({
+  workspaceId: id,
+  instanceId: id,
+  hostId: "local",
+  references: numbers.map((n, i) => ({
+    key: `k${n}`,
+    type: i ? "pr" : "issue",
+    url: `https://github.com/acme/app/${i ? "pull" : "issues"}/${n}`,
+    label: `Ref ${n}`,
+    selected: i === 0,
+  })),
+  unsupportedSelected: false,
+});
+const assigned = () => ({
+  workspaceButtonVersion: 1,
+  workspace: { workspaceId: "a", workspaceName: "A" },
+  reference: {
+    workspaceId: "a",
+    key: "deleted",
+    url: "https://github.com/acme/app/pull/99",
+  },
+});
+const double = async (f) => {
+  f.controller.down("x");
+  f.controller.up("x");
+  await f.advance(100);
+  f.controller.down("x");
+  f.controller.up("x");
+  await tick();
+  await tick();
+};
+test("ダブルは割当WSのPRとIssueを全件開き、旧選択設定とアクティブWSでは絞らない", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", assigned());
+  await f.bind(k);
+  f.setSelected("b");
+  const data = batchRefs();
+  data.references.push({ ...data.references[1], key: "dup" });
+  f.references(async (id) => {
+    assert.equal(id, "a");
+    return data;
+  });
+  await double(f);
+  assert.deepEqual(
+    f.effects,
+    batchRefs().references.map((r) => ["url", r.url]),
+  );
+  assert.equal(k.settings.reference.key, "deleted");
+  assert.match((await f.controller.view("x")).notice, /3/u);
+});
+test("関連先一覧の順序変更は許容し、追加・消失・URL変更では一件も開かない", async (t) => {
+  for (const kind of ["reorder", "added", "removed", "changed"]) {
+    const f = fixture(t),
+      k = f.key("x", assigned());
+    await f.bind(k);
+    let reads = 0;
+    f.references(async () => {
+      const d = batchRefs();
+      if (++reads > 1) {
+        if (kind === "reorder") d.references.reverse();
+        if (kind === "added")
+          d.references.push({
+            ...d.references[1],
+            key: "new",
+            url: "https://github.com/acme/app/pull/4",
+          });
+        if (kind === "removed") d.references.pop();
+        if (kind === "changed")
+          d.references[1].url = "https://github.com/acme/app/pull/4";
+      }
+      return d;
+    });
+    await double(f);
+    assert.equal(f.effects.length, kind === "reorder" ? 3 : 0, kind);
+    t.mock.timers.reset();
+  }
+});
+test("一件の送信結果が不明でも別URLは一回ずつ試し、結果不明と未送信を分ける", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", assigned());
+  await f.bind(k);
+  f.references(async () => batchRefs());
+  f.openUrl(async (url) => {
+    if (url.endsWith("/2")) throw Error("browser response lost");
+  });
+  await double(f);
+  assert.equal(f.effects.length, 3);
+  const view = await f.controller.view("x");
+  assert.equal(view.linkResult.requested.length, 2);
+  assert.equal(view.linkResult.unconfirmed.length, 1);
+  assert.equal(view.linkResult.notRequested.length, 0);
+  assert.match(view.error, /確認でき/u);
+});
+test("一件目の遅い送信中の再割当・離脱・切断では残りを開かず連打も溜めない", async (t) => {
+  for (const kind of ["rebind", "leave", "disconnect"]) {
+    const f = fixture(t),
+      k = f.key("x", assigned());
+    await f.bind(k);
+    f.references(async () => batchRefs());
+    let release;
+    f.openUrl(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    await double(f);
+    assert.equal(f.effects.length, 1);
+    f.controller.down("x");
+    f.controller.up("x");
+    if (kind === "rebind")
+      await f.bind(k, {
+        workspaceButtonVersion: 1,
+        workspace: { workspaceId: "b", workspaceName: "B" },
+      });
+    if (kind === "leave") f.controller.unbind("x");
+    if (kind === "disconnect") f.disconnect();
+    release();
+    await tick();
+    await f.advance(1000);
+    assert.equal(f.effects.length, 1, kind);
+    if (kind === "rebind")
+      assert.equal((await f.controller.view("x")).linkResult, undefined);
+    t.mock.timers.reset();
+  }
+});
+test("最終参照応答のWS実体またはhostが違う場合は開かない", async (t) => {
+  for (const patch of [{ instanceId: "recreated" }, { hostId: "remote" }]) {
+    const initial = assigned();
+    delete initial.reference;
+    const f = fixture(t),
+      k = f.key("x", initial);
+    await f.bind(k);
+    let reads = 0;
+    f.references(async () => ({
+      ...batchRefs(),
+      ...(++reads > 1 ? patch : {}),
+    }));
+    await double(f);
+    assert.deepEqual(f.effects, []);
+    t.mock.timers.reset();
+  }
+});
+
+test("監視未取得で開始しても最初に検証したruntimeへ固定し、別runtimeへの残り送信を止める", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", assigned());
+  f.monitorSnapshot(null);
+  await f.bind(k);
+  f.references(async () => batchRefs());
+  let release;
+  f.openUrl(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  await double(f);
+  assert.equal(f.effects.length, 1);
+  f.monitorSnapshot({
+    runtimeId: "r2",
+    workspaces: [ws("a"), ws("b")],
+    truncated: false,
+  });
+  release();
+  await tick();
+  await tick();
+  assert.equal(f.effects.length, 1);
+});
+test("最後のURL送信中の操作中止でも取得中表示を残さず、送信済みと中止を両方示す", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", assigned()),
+    other = f.key("y", {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "b", workspaceName: "B" },
+    });
+  await f.bind(k);
+  await f.bind(other);
+  f.references(async () => batchRefs("a", [1]));
+  let release;
+  f.openUrl(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  await double(f);
+  f.controller.down("y");
+  f.controller.up("y");
+  await f.advance(500);
+  release();
+  await tick();
+  await tick();
+  const view = await f.controller.view("x");
+  assert.equal(view.linkResult.requested.length, 1);
+  assert.equal(view.linkResult.notRequested.length, 0);
+  assert.equal(view.linkResult.cancelled, true);
+  assert.match(f.images.filter(([id]) => id === "x").at(-1)[1], />中止</u);
+});
+
+test("遅い一覧取得の後も最新の起動結果と処理中状態を返し、記録なしへ戻さない", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", assigned());
+  await f.bind(k);
+  let release,
+    reads = 0;
+  f.references(async () =>
+    ++reads === 1
+      ? await new Promise((resolve) => {
+          release = () => resolve(batchRefs());
+        })
+      : batchRefs(),
+  );
+  const pending = f.controller.view("x");
+  await tick();
+  await double(f);
+  release();
+  assert.equal((await pending).linkResult.requested.length, 3);
+});
+test("送信中の結果は進行中と総件数を持ち、完了済み0件にしない", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", assigned());
+  await f.bind(k);
+  f.references(async () => batchRefs());
+  let release;
+  f.openUrl(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  await double(f);
+  const view = await f.controller.view("x");
+  assert.equal(view.linkResult.inProgress, true);
+  assert.equal(view.linkResult.total, 3);
+  assert.equal(view.ready, false);
+  f.controller.unbind("x");
+  release();
+  await tick();
+});
+
+test("新しいダブル操作の進行中へ前回の部分失敗を混ぜない", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", assigned());
+  await f.bind(k);
+  f.references(async () => batchRefs());
+  f.openUrl(async () => {
+    throw Error("previous batch failed");
+  });
+  await double(f);
+  assert.ok((await f.controller.view("x")).error);
+  let release;
+  f.openUrl(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  await double(f);
+  const view = await f.controller.view("x");
+  assert.equal(view.error, null);
+  assert.equal(view.linkResult.inProgress, true);
+  f.controller.unbind("x");
+  release();
+  await tick();
+});
+
+for (const kind of ["offline", "runtime"]) {
+  test(`遅いPI一覧応答の間に${kind}へ変わった場合は古い関連先を確認済みとして出さない`, async (t) => {
+    const f = fixture(t),
+      k = f.key("x", assigned());
+    await f.bind(k);
+    let release;
+    f.references(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(batchRefs());
+        }),
+    );
+    const pending = f.controller.view("x");
+    await tick();
+    f.monitorState(
+      kind === "offline"
+        ? { snapshot: null, error: "offline" }
+        : {
+            snapshot: {
+              runtimeId: "r2",
+              workspaces: [ws("a")],
+              truncated: false,
+            },
+            error: null,
+          },
+    );
+    release();
+    const view = await pending;
+    assert.deepEqual(view.references, []);
+    assert.equal(view.ready, false);
+    assert.ok(view.error || view.linkError);
+  });
+}

@@ -15,10 +15,10 @@
       <p class="hint">液晶はWS名を大きく、プロジェクトと状態を表示します。未割当はプラス印、長押し中は「登録待ち」、保存確認後はチェック印と「登録済」を表示します。操作説明はこの画面で確認できます。</p>
       <ul class="gestures">
         <li><strong>短押し</strong>：登録したWSへ移動。指を離してから500ms待ちます。</li>
-        <li><strong>ダブル</strong>：指を離して500ms以内にもう一度押し、離すと関連Issue / PRを開きます。</li>
+        <li><strong>ダブル</strong>：指を離して500ms以内にもう一度押し、離すと登録WSに紐づくPR / Issueをすべて開きます。</li>
         <li><strong>長押し</strong>：700msで画面選択WSを登録。二押目を長押しした場合も登録だけです。</li>
       </ul>
-      <p class="hint">割当と関連先はこのボタン専用です。同じWSを登録した他のボタンとも独立しています。長押し登録でWS移動やAI入力は行いません。</p>
+      <p class="hint">割当はこのボタン専用です。同じWSを登録した他のボタンとも独立しています。長押し登録でWS移動やAI入力は行いません。</p>
       <section class="selection" aria-label="このボタンの割当先">
         <p class="selection-label">割当済みワークスペース</p>
         <p id="workspace-name">取得しています…</p>
@@ -26,11 +26,14 @@
         <p id="workspace-status"></p>
       </section>
       <section class="selection" aria-label="ダブルで開く関連先">
-        <label for="reference">ダブルで開く関連先</label>
+        <h2 class="selection-label">ダブルで開く関連先（全件）</h2>
         <p id="link-status" role="status"></p>
-        <select id="reference" disabled></select>
-        <button id="save-reference" type="button" disabled>この関連先を保存</button>
-        <p class="hint">Orcaの選択中参照を優先します。指定がなければPR、次にIssue。同順位が複数ならここで選びます。消失した選択を別リンクへ振り替えません。</p>
+        <ul id="references" class="reference-list"></ul>
+        <p class="hint">Orcaに保存されたGitHubのPR / Issueを既定ブラウザーですべて開きます。選択中の参照や以前の個別選択には絞りません。同じURLは一回だけ開きます。</p>
+      </section>
+      <section class="selection" aria-label="直近の関連先起動">
+        <h2 class="selection-label">直近の関連先起動</h2>
+        <p id="link-result" class="identity"></p>
       </section>
       <div class="connection">
         <p id="message" role="status" aria-live="polite">Stream Deck に接続しています…</p>

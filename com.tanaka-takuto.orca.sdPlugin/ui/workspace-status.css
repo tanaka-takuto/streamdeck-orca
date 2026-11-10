@@ -197,3 +197,14 @@ select:focus-visible {
   overflow-wrap: anywhere;
   line-height: 1.6;
 }
+
+.reference-list {
+  padding-left: 18px;
+  margin: 10px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+.reference-list li {
+  margin: 9px 0;
+}
