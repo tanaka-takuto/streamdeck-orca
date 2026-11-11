@@ -60,6 +60,7 @@ const feedbackLabels: Record<string, [string, KeyIcon]> = {
   選択WSを取得中: ["WS取得中", "spinner"],
   登録を保存中: ["保存中", "spinner"],
   登録完了: ["登録済", "check"],
+  割当を解除中: ["解除中", "spinner"],
   移動中: ["移動中", "spinner"],
   関連先を取得中: ["関連取得", "spinner"],
   関連先を送信中: ["要求中", "spinner"],

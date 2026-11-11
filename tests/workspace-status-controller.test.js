@@ -26,6 +26,7 @@ function fixture(t, saved = {}) {
     delay,
     onWrite,
     selectionReader,
+    snapshotReader,
     referenceReader,
     urlHandler;
   const listeners = new Set(),
@@ -61,6 +62,7 @@ function fixture(t, saved = {}) {
         : { runtimeId, workspace: ws(selected) };
     },
     async snapshot() {
+      if (snapshotReader) return await snapshotReader();
       return { ...cliSnapshot, runtimeId };
     },
     async focusWorkspace(id, current) {
@@ -155,6 +157,9 @@ function fixture(t, saved = {}) {
     selection(fn) {
       selectionReader = fn;
     },
+    snapshot(fn) {
+      snapshotReader = fn;
+    },
     setSelected(id) {
       selected = id;
     },
@@ -189,6 +194,293 @@ function fixture(t, saved = {}) {
     },
   };
 }
+const completeSnapshot = (workspaces, extra = {}) => ({
+  runtimeId: "r",
+  workspaces,
+  hostIds: ["local"],
+  truncated: false,
+  omittedHosts: false,
+  ...extra,
+});
+
+test("削除を確認したWSのキーだけ割当と関連先を解除し、再表示後も未割当から長押し登録できる", async (t) => {
+  const f = fixture(t),
+    initial = {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "a", workspaceName: "A", hostId: "local" },
+      reference: {
+        workspaceId: "a",
+        key: "old",
+        url: "https://github.com/acme/app/pull/1",
+      },
+      custom: "keep",
+    },
+    k = f.key("x", initial),
+    mirror = f.key("mirror", initial),
+    other = f.key("other", {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "b", workspaceName: "B" },
+    });
+  await f.bind(k);
+  await f.bind(mirror);
+  await f.bind(other);
+  const remaining = completeSnapshot([ws("b")]);
+  f.snapshot(() => remaining);
+  f.monitorState({ snapshot: remaining, error: null });
+  await tick();
+  assert.equal(k.settings.workspace, undefined);
+  assert.equal(k.settings.reference, undefined);
+  assert.equal(k.settings.custom, "keep");
+  assert.equal(mirror.settings.workspace, undefined);
+  assert.equal(other.settings.workspace.workspaceId, "b");
+  assert.match(f.images.filter(([id]) => id === "x").at(-1)[1], /未割当/);
+  assert.deepEqual(f.effects, []);
+  f.controller.unbind("x");
+  await f.bind(k);
+  assert.equal((await f.controller.view("x")).status, "unassigned");
+  f.setSelected("b");
+  f.controller.down("x");
+  await f.advance(700);
+  f.controller.up("x");
+  assert.equal(k.settings.workspace.workspaceId, "b");
+});
+
+for (const [name, patch] of [
+  ["通信失敗", { error: "offline" }],
+  ["未取得", { snapshot: null }],
+  ["キャッシュ", { fromCache: true }],
+  ["一部取得", { snapshot: completeSnapshot([], { truncated: true }) }],
+  [
+    "ホスト取得漏れ",
+    { snapshot: completeSnapshot([], { omittedHosts: true }) },
+  ],
+  [
+    "ホスト取得漏れ不明",
+    { snapshot: completeSnapshot([], { omittedHosts: undefined }) },
+  ],
+  ["ホスト対象外", { snapshot: completeSnapshot([], { hostIds: ["remote"] }) }],
+  [
+    "ホスト対象不明",
+    { snapshot: completeSnapshot([], { hostIds: undefined }) },
+  ],
+]) {
+  test(`${name}をWS削除と見なして割当を消さない`, async (t) => {
+    const f = fixture(t),
+      initial = {
+        workspaceButtonVersion: 1,
+        workspace: { workspaceId: "a", workspaceName: "A", hostId: "local" },
+      },
+      k = f.key("x", initial);
+    await f.bind(k);
+    f.snapshot(() => completeSnapshot([]));
+    f.monitorState({ snapshot: completeSnapshot([]), error: null, ...patch });
+    await tick();
+    assert.deepEqual(k.settings, initial);
+    assert.deepEqual(f.effects, []);
+  });
+}
+
+test("削除の再確認でWSが戻っていれば割当を解除しない", async (t) => {
+  const f = fixture(t),
+    initial = {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "a", workspaceName: "A" },
+    },
+    k = f.key("x", initial);
+  await f.bind(k);
+  f.snapshot(() => completeSnapshot([ws("a")]));
+  f.monitorState({ snapshot: completeSnapshot([]), error: null });
+  await tick();
+  assert.deepEqual(k.settings, initial);
+});
+
+test("削除検出は判定待ちの短押しを取り消し、自動で別WSへ移動しない", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "a", workspaceName: "A" },
+    });
+  await f.bind(k);
+  f.controller.down("x");
+  f.controller.up("x");
+  f.snapshot(() => completeSnapshot([ws("b")]));
+  f.monitorState({ snapshot: completeSnapshot([ws("b")]), error: null });
+  await f.advance(700);
+  assert.equal(k.settings.workspace, undefined);
+  assert.deepEqual(f.effects, []);
+});
+
+test("長押しで別WSへ再登録中なら旧WSの削除から新しい割当を解除しない", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "a", workspaceName: "A" },
+    });
+  await f.bind(k);
+  let release;
+  f.slow(
+    new Promise((resolve) => {
+      release = resolve;
+    }),
+  );
+  f.setSelected("b");
+  f.controller.down("x");
+  await f.advance(700);
+  f.snapshot(() => completeSnapshot([ws("b")]));
+  f.monitorState({ snapshot: completeSnapshot([ws("b")]), error: null });
+  release();
+  await tick();
+  f.controller.up("x");
+  assert.equal(k.settings.workspace.workspaceId, "b");
+  assert.deepEqual(f.effects, []);
+});
+
+test("削除解除の保存を読戻せなければ元割当を復元して未割当を表示しない", async (t) => {
+  const f = fixture(t),
+    initial = {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "a", workspaceName: "A" },
+    },
+    k = f.key("x", initial);
+  await f.bind(k);
+  let once = true;
+  f.onWrite(() => {
+    if (once) {
+      once = false;
+      f.failRead();
+    }
+  });
+  f.snapshot(() => completeSnapshot([]));
+  f.monitorState({ snapshot: completeSnapshot([]), error: null });
+  await tick();
+  assert.deepEqual(k.settings, initial);
+  assert.doesNotMatch(f.images.at(-1)[1], /未割当/);
+  assert.match(f.images.at(-1)[1], /保存失敗/);
+});
+
+test("同じIDのWSが削除・再作成されたら旧実体の割当を未割当に戻す", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", {
+      workspaceButtonVersion: 1,
+      workspace: {
+        workspaceId: "a",
+        workspaceName: "A",
+        instanceId: "a",
+        hostId: "local",
+      },
+    }),
+    recreated = completeSnapshot([{ ...ws("a"), instanceId: "recreated" }]);
+  await f.bind(k);
+  f.snapshot(() => recreated);
+  f.monitorState({ snapshot: recreated, error: null });
+  await tick();
+  assert.equal(k.settings.workspace, undefined);
+  assert.match(f.images.at(-1)[1], /未割当/);
+  assert.deepEqual(f.effects, []);
+});
+
+for (const rows of [
+  [{ ...ws("a"), instanceId: undefined }],
+  [{ ...ws("a"), hostId: "remote", instanceId: "recreated" }],
+  [ws("a"), { ...ws("a"), instanceId: "recreated" }],
+]) {
+  test(`実体不明・別ホスト・重複IDを削除と断定して解除しない: ${JSON.stringify(rows.map(({ hostId, instanceId }) => ({ hostId, instanceId })))}`, async (t) => {
+    const f = fixture(t),
+      initial = {
+        workspaceButtonVersion: 1,
+        workspace: {
+          workspaceId: "a",
+          workspaceName: "A",
+          instanceId: "a",
+          hostId: "local",
+        },
+      },
+      k = f.key("x", initial),
+      snapshot = completeSnapshot(rows, { hostIds: ["local", "remote"] });
+    await f.bind(k);
+    f.snapshot(() => snapshot);
+    f.monitorState({ snapshot, error: null });
+    await tick();
+    assert.deepEqual(k.settings, initial);
+  });
+}
+
+test("削除解除の読込中に新しい割当が届いたら遅い解除で上書きしない", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "a", workspaceName: "A" },
+    });
+  await f.bind(k);
+  const getSettings = k.getSettings;
+  let release;
+  k.getSettings = async () => {
+    await new Promise((resolve) => {
+      release = resolve;
+    });
+    return getSettings();
+  };
+  f.snapshot(() => completeSnapshot([ws("b")]));
+  f.monitorState({ snapshot: completeSnapshot([ws("b")]), error: null });
+  await tick();
+  assert.equal(typeof release, "function");
+  k.patch({ workspace: { workspaceId: "b", workspaceName: "B" } });
+  await f.bind(k);
+  release();
+  await tick();
+  assert.equal(k.settings.workspace.workspaceId, "b");
+  assert.deepEqual(f.effects, []);
+});
+
+test("削除の再確認中に接続を失ったら割当を残して取得失敗を表示する", async (t) => {
+  const f = fixture(t),
+    initial = {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "a", workspaceName: "A" },
+    },
+    k = f.key("x", initial);
+  await f.bind(k);
+  let release;
+  f.snapshot(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve(completeSnapshot([]));
+      }),
+  );
+  f.monitorState({ snapshot: completeSnapshot([]), error: null });
+  await tick();
+  f.monitorState({ snapshot: null, error: "offline" });
+  release();
+  await tick();
+  assert.deepEqual(k.settings, initial);
+  assert.match(f.images.at(-1)[1], /取得失敗/);
+});
+
+test("解除前に監視一覧へWSが戻ったら割当を残して解除中表示も解消する", async (t) => {
+  const f = fixture(t),
+    initial = {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "a", workspaceName: "A" },
+    },
+    k = f.key("x", initial);
+  await f.bind(k);
+  let release;
+  f.snapshot(
+    () =>
+      new Promise((resolve) => {
+        release = () => resolve(completeSnapshot([]));
+      }),
+  );
+  f.monitorState({ snapshot: completeSnapshot([]), error: null });
+  await tick();
+  f.monitorState({ snapshot: completeSnapshot([ws("a")]), error: null });
+  release();
+  await tick();
+  assert.deepEqual(k.settings, initial);
+  assert.match(f.images.at(-1)[1], /待機/);
+  assert.doesNotMatch(f.images.at(-1)[1], /解除中/);
+});
+
 test("未割当は自動選択せず長押し保存確認後だけ登録し移動しない", async (t) => {
   const f = fixture(t),
     k = f.key("x", { custom: "keep" });

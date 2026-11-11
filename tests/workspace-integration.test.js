@@ -512,6 +512,51 @@ test("未割当ボタンは先頭WSを選ばずkeyDownだけでは移動しな�
   assert.deepEqual(f.switches(), []);
 });
 
+test("SDKでWS削除後は割当を保存解除して未割当に戻り、他キーを変えず長押し再登録できる", async (t) => {
+  const f = await fixture(t);
+  f.appear("deleted", "key", undefined, {
+    workspaceButtonVersion: 1,
+    workspace: { workspaceId: "a", workspaceName: "A", hostId: "local" },
+    custom: "keep",
+  });
+  f.appear("other", "key", undefined, {
+    workspaceButtonVersion: 1,
+    workspace: { workspaceId: "b", workspaceName: "B", hostId: "local" },
+  });
+  await f.wait(imageContains("deleted", "進行中"));
+  await f.wait(imageContains("other", "進行中"));
+  const start = f.history.length;
+  f.setRows(["b"]);
+  const cleared = await f.wait(
+    (m) =>
+      m.event === "setSettings" &&
+      m.context === "deleted" &&
+      !m.payload.workspace,
+    start,
+  );
+  assert.equal(cleared.payload.custom, "keep");
+  assert.equal(cleared.payload.workspaceButtonVersion, 1);
+  await f.wait(imageContains("deleted", "未割当"), start);
+  assert.ok(
+    f.history
+      .slice(start)
+      .every((m) => m.event !== "setSettings" || m.context !== "other"),
+  );
+  assert.deepEqual(f.switches(), []);
+  assert.deepEqual(f.executions(), []);
+  const selected = snapshot(["b"]);
+  selected.result.worktrees[0].isActive = true;
+  f.setSnapshot(selected);
+  f.send("keyDown", "deleted", "key");
+  await f.wait((m) => m.event === "showOk" && m.context === "deleted", start);
+  f.send("keyUp", "deleted", "key");
+  const registered = f.history.findLast(
+    (m) => m.event === "setSettings" && m.context === "deleted",
+  );
+  assert.equal(registered.payload.workspace.workspaceId, "b");
+  assert.deepEqual(f.switches(), []);
+});
+
 test("SDKでOrca再起動後も既存キーの警告を残さず、保存済WSへの移動と長押し再登録ができる", async (t) => {
   const f = await fixture(t),
     initial = {

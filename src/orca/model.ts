@@ -29,6 +29,7 @@ export type OrcaSnapshot = {
   runtimeId: string;
   workspaces: OrcaWorkspace[];
   truncated: boolean;
+  hostIds?: string[];
   omittedHosts?: boolean;
 };
 
@@ -151,6 +152,7 @@ export function parseSnapshot(value: unknown): OrcaSnapshot {
   return {
     runtimeId,
     workspaces,
+    hostIds,
     truncated: result.truncated !== false,
     omittedHosts: !Array.isArray(omitted) || omitted.length > 0,
   };

@@ -1,5 +1,9 @@
 import type { OrcaClient } from "./orca/client";
-import { getWorkspaceStatus, type OrcaWorkspace } from "./orca/model";
+import {
+  getWorkspaceStatus,
+  type OrcaSnapshot,
+  type OrcaWorkspace,
+} from "./orca/model";
 import type { WorkspaceMonitor } from "./orca/monitor";
 import {
   allReferences,
@@ -57,7 +61,8 @@ type Binding = {
   feedbackTimer?: ReturnType<typeof setTimeout>;
   error?: string;
   notice?: string;
-  operating?: boolean;
+  operating?: WorkspaceGestureKind | "unassign";
+  unassigning?: Promise<void>;
   pressReady?: boolean;
   linkResult?: LinkResult;
 };
@@ -80,6 +85,30 @@ const savedWorkspace = (value: unknown): value is ButtonWorkspace =>
   !!value.workspaceId &&
   "workspaceName" in value &&
   typeof value.workspaceName === "string";
+const workspaceMissing = (
+  assignment: ButtonWorkspace,
+  snapshot: OrcaSnapshot | null,
+): boolean => {
+  const hostId = assignment.hostId ?? "local";
+  if (
+    snapshot?.truncated !== false ||
+    snapshot.omittedHosts !== false ||
+    !snapshot.hostIds?.includes(hostId)
+  )
+    return false;
+  const rows = snapshot.workspaces.filter(
+    (row) => row.id === assignment.workspaceId,
+  );
+  if (!rows.length) return true;
+  const row = rows[0];
+  return (
+    rows.length === 1 &&
+    row?.hostId === hostId &&
+    !!assignment.instanceId &&
+    !!row.instanceId &&
+    row.instanceId !== assignment.instanceId
+  );
+};
 
 export class WorkspaceStatusController {
   private readonly bindings = new Map<string, Binding>();
@@ -136,6 +165,7 @@ export class WorkspaceStatusController {
       b.monitorFailed = false;
       b.runtimeId = state.snapshot.runtimeId;
       if (b.retryInitialization && !state.fromCache) void this.initialize(b);
+      void this.unassignMissing(b);
     });
     await this.initialize(b);
   }
@@ -172,7 +202,69 @@ export class WorkspaceStatusController {
       this.fail(b, error, "保存失敗");
     } finally {
       b.initializing = false;
+      void this.unassignMissing(b);
     }
+  }
+  private unassignMissing(b: Binding): Promise<void> {
+    if (b.unassigning) return b.unassigning;
+    const assignment = b.settings.workspace;
+    const state = this.monitor.state;
+    if (
+      !this.current(b) ||
+      !b.ready ||
+      b.initializing ||
+      b.operating === "long" ||
+      !savedWorkspace(assignment) ||
+      state.error ||
+      state.fromCache ||
+      !workspaceMissing(assignment, state.snapshot)
+    )
+      return Promise.resolve();
+    // 削除された対象への保留操作を中止する。別WSの長押し登録は優先する。
+    b.gesture.cancel();
+    if (b.operating) return Promise.resolve();
+    b.operating = "unassign";
+    this.feedback(b, "割当を解除中");
+    const runtimeId = state.snapshot?.runtimeId;
+    let verified = true;
+    const current = () => {
+      const latest = this.monitor.state;
+      return (
+        verified &&
+        this.current(b) &&
+        same(b.settings.workspace, assignment) &&
+        !latest.error &&
+        !latest.fromCache &&
+        latest.snapshot?.runtimeId === runtimeId &&
+        workspaceMissing(assignment, latest.snapshot)
+      );
+    };
+    const next = { ...b.settings };
+    delete next.workspace;
+    delete next.reference;
+    const pending = this.save(b, next, current, async () => {
+      // 保存直前にも一覧を再取得し、一時的な欠落だけで割当を消さない。
+      const check = await this.client.snapshot();
+      verified =
+        check.runtimeId === runtimeId && workspaceMissing(assignment, check);
+    })
+      .then(() => {
+        if (!this.current(b)) return;
+        if (!b.settings.workspace) {
+          b.notice = undefined;
+          b.pressReady = false;
+          this.feedback(b);
+        } else if (!b.monitorFailed) {
+          this.feedback(b);
+        }
+      })
+      .catch((error: unknown) => this.fail(b, error, "保存失敗"))
+      .finally(() => {
+        b.operating = undefined;
+        b.unassigning = undefined;
+      });
+    b.unassigning = pending;
+    return pending;
   }
   unbind(id: string): void {
     const b = this.bindings.get(id);
@@ -272,6 +364,7 @@ export class WorkspaceStatusController {
       reference: next.reference,
     };
     delete value.controlId;
+    if (!next.workspace) delete value.workspace;
     if (!next.reference) delete value.reference;
     if (validate) await validate();
     if (!current()) return;
@@ -321,7 +414,7 @@ export class WorkspaceStatusController {
     gestureCurrent: () => boolean,
   ): Promise<void> {
     if (b.operating) return;
-    b.operating = true;
+    b.operating = kind;
     b.notice = undefined;
     if (kind === "double") {
       b.linkResult = undefined;
@@ -503,7 +596,8 @@ export class WorkspaceStatusController {
       if (current())
         this.fail(b, error, kind === "long" ? "登録失敗" : "取得失敗");
     } finally {
-      b.operating = false;
+      b.operating = undefined;
+      void this.unassignMissing(b);
     }
   }
   private checkReferences(
@@ -538,6 +632,7 @@ export class WorkspaceStatusController {
     const b = this.bindings.get(id);
     if (!b) return undefined;
     const state = await this.monitor.refresh();
+    await this.unassignMissing(b);
     if (!this.current(b)) return undefined;
     const assignment = b.settings.workspace;
     const revision = JSON.stringify(targetFields(b.settings));

@@ -101,6 +101,7 @@ test("ボタンの固定 ID で選べる情報だけを抽出する", () => {
     },
   });
   assert.equal(snapshot.runtimeId, "runtime-a");
+  assert.deepEqual(snapshot.hostIds, ["local"]);
   assert.equal(snapshot.workspaces[0].id, "repo::/workspace-a");
   assert.equal(getWorkspaceStatus(snapshot.workspaces[0]), "working");
   assert.equal("workspaceStatus" in snapshot.workspaces[0], false);
