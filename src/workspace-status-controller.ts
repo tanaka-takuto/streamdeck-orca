@@ -48,7 +48,10 @@ type Binding = {
   settings: WorkspaceButtonSettings;
   gesture: WorkspaceGesture;
   ready: boolean;
+  initializing?: boolean;
+  retryInitialization?: boolean;
   runtimeId?: string;
+  monitorFailed?: boolean;
   stop?: () => void;
   pending?: WorkspaceButtonSettings;
   feedbackTimer?: ReturnType<typeof setTimeout>;
@@ -117,26 +120,46 @@ export class WorkspaceStatusController {
     this.bindings.set(key.id, b);
     this.draw(b);
     b.stop = this.monitor.subscribe((state) => {
-      if (
-        state.error ||
-        (b.runtimeId &&
-          state.snapshot &&
-          b.runtimeId !== state.snapshot.runtimeId)
-      ) {
+      if (state.error) {
         b.gesture.cancel();
-        this.feedback(b, state.error ? "取得失敗" : "環境変更・再操作");
+        b.monitorFailed = true;
+        this.feedback(b, "取得失敗");
+        return;
       }
-      if (state.snapshot) b.runtimeId = state.snapshot.runtimeId;
+      if (!state.snapshot) return;
+      // 再起動後も保存済み割当を使う。環境変更の警告は中止した操作にだけ出す。
+      if (b.runtimeId && b.runtimeId !== state.snapshot.runtimeId) {
+        const interrupted = b.gesture.cancel();
+        if (interrupted) this.feedback(b, "環境変更・再操作", true);
+        else if (b.monitorFailed) this.feedback(b);
+      } else if (b.monitorFailed) this.feedback(b);
+      b.monitorFailed = false;
+      b.runtimeId = state.snapshot.runtimeId;
+      if (b.retryInitialization && !state.fromCache) void this.initialize(b);
     });
+    await this.initialize(b);
+  }
+  private async initialize(b: Binding): Promise<void> {
+    if (!this.current(b) || b.initializing) return;
+    b.initializing = true;
+    b.retryInitialization = false;
+    const settings = b.settings;
     try {
       if (settings.workspaceButtonVersion !== 1) {
         const legacyId =
           typeof settings.controlId === "string" && settings.controlId.trim()
             ? normalizeControlId(settings.controlId)
             : undefined;
-        const legacy = legacyId
-          ? (await this.readGlobal()).workspaceSelections?.[legacyId]
-          : undefined;
+        let legacy: unknown;
+        if (legacyId) {
+          try {
+            legacy = (await this.readGlobal()).workspaceSelections?.[legacyId];
+          } catch (error) {
+            // 未保存の読込失敗だけを再試行し、保存結果不明は自動再試行しない。
+            b.retryInitialization = true;
+            throw error;
+          }
+        }
         if (!this.current(b)) return;
         const next = { ...settings, workspaceButtonVersion: 1 };
         delete next.controlId;
@@ -147,6 +170,8 @@ export class WorkspaceStatusController {
       if (this.current(b)) b.ready = true;
     } catch (error) {
       this.fail(b, error, "保存失敗");
+    } finally {
+      b.initializing = false;
     }
   }
   unbind(id: string): void {

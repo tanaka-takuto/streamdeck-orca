@@ -45,7 +45,8 @@ export class WorkspaceGesture {
       }, DOUBLE_CLICK_MS);
     }
   }
-  cancel(): void {
+  cancel(): boolean {
+    const interrupted = this.held || this.click !== undefined || this.busy;
     ++this.revision;
     clearTimeout(this.hold);
     clearTimeout(this.click);
@@ -53,6 +54,7 @@ export class WorkspaceGesture {
     // A key-up belonging to a cancelled press must never start a new gesture.
     this.consumed = true;
     this.second = false;
+    return interrupted;
   }
   private run(kind: WorkspaceGestureKind): void {
     if (this.busy) return;

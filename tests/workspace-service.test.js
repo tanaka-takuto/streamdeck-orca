@@ -91,6 +91,84 @@ test("旧global取得失敗ではボタンの移行フラグと旧IDを保存変
   await f.service.status.bind(f.key, initial);
   assert.deepEqual(writes, []);
 });
+test("起動時の旧global読込失敗は正常接続後に再試行し、同じキーで再登録できる", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = await fixture(t),
+    writes = [],
+    focused = [],
+    saved = {
+      workspaceSelections: { main: { workspaceId: "A", workspaceName: "A" } },
+    };
+  let unavailable = true,
+    settings = { controlId: "main", custom: "keep" };
+  f.sdk.settings.getGlobalSettings = async () => {
+    if (unavailable) throw Error("temporary offline");
+    return saved;
+  };
+  f.key.getSettings = async () => structuredClone(settings);
+  f.key.setSettings = async (value) => {
+    writes.push(value);
+    settings = structuredClone(value);
+  };
+  f.service.client.selectedWorkspace = async () => ({
+    runtimeId: "r",
+    workspace: f.rows[1],
+  });
+  f.service.client.focusWorkspace = async (id, current) => {
+    if (current()) focused.push(id);
+    return true;
+  };
+  await f.service.status.bind(f.key, settings);
+  await tick();
+  assert.deepEqual(writes, []);
+  unavailable = false;
+  await f.service.monitor.refresh();
+  await tick();
+  assert.equal(settings.workspace?.workspaceId, "A");
+  assert.equal(settings.custom, "keep");
+  assert.equal(writes.length, 1);
+  assert.deepEqual(focused, []);
+  f.service.status.down(f.key.id);
+  f.service.status.up(f.key.id);
+  t.mock.timers.tick(500);
+  await tick();
+  assert.deepEqual(focused, ["A"]);
+  f.service.status.down(f.key.id);
+  t.mock.timers.tick(700);
+  await tick();
+  f.service.status.up(f.key.id);
+  assert.equal(settings.workspace.workspaceId, "B");
+  assert.match(f.visible, /登録済/u);
+});
+test("移行の保存と復元の結果が不明なら正常接続でも自動保存や操作を再開しない", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = await fixture(t),
+    initial = { controlId: "main" };
+  let reads = 0,
+    writes = 0;
+  f.sdk.settings.getGlobalSettings = async () => ({
+    workspaceSelections: { main: { workspaceId: "A", workspaceName: "A" } },
+  });
+  f.key.getSettings = async () => {
+    if (++reads > 1) throw Error("read failed");
+    return initial;
+  };
+  f.key.setSettings = async () => {
+    if (++writes > 1) throw Error("restore failed");
+  };
+  await f.service.status.bind(f.key, initial);
+  await tick();
+  assert.equal(writes, 2);
+  assert.match(f.visible, /保存不明/u);
+  await f.service.monitor.refresh();
+  await tick();
+  f.service.status.down(f.key.id);
+  t.mock.timers.tick(700);
+  f.service.status.up(f.key.id);
+  await tick();
+  assert.equal(writes, 2);
+  assert.match(f.visible, /保存不明/u);
+});
 test("旧割当を一度だけ引き継ぎ、PR起動記録を含むglobalを一切書き換えない", async (t) => {
   const f = await fixture(t);
   const global = {

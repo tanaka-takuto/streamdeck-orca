@@ -231,6 +231,106 @@ test("旧IDから各ボタンへ一度移行し再割当/再起動後も独立�
   assert.equal(a.settings.workspace.workspaceId, "b");
   assert.deepEqual(saved, before);
 });
+test("待機中のOrca再起動では環境変更を出さず、既存キーの割当・移動・再登録を保つ", async (t) => {
+  const f = fixture(t),
+    initial = {
+      workspaceButtonVersion: 1,
+      workspace: {
+        workspaceId: "a",
+        workspaceName: "A",
+        instanceId: "a",
+        hostId: "local",
+      },
+    },
+    k = f.key("x", initial);
+  await f.bind(k);
+  const start = f.images.length;
+  f.setRuntime("restarted");
+  f.monitorState({
+    snapshot: {
+      runtimeId: "restarted",
+      workspaces: [ws("a"), ws("b")],
+      truncated: false,
+    },
+    error: null,
+  });
+  await tick();
+  assert.deepEqual(k.settings, initial);
+  assert.ok(
+    f.images.slice(start).every(([, image]) => !image.includes("環境変更")),
+  );
+  f.controller.down("x");
+  f.controller.up("x");
+  await f.advance(500);
+  assert.deepEqual(f.effects, [["focus", "a"]]);
+  f.setSelected("b");
+  f.controller.down("x");
+  await f.advance(700);
+  f.controller.up("x");
+  assert.equal(k.settings.workspace.workspaceId, "b");
+  assert.match(f.images.at(-1)[1], /登録済/);
+});
+
+for (const runtimeId of ["r", "restarted"]) {
+  test(`起動時の接続失敗から${runtimeId}へ復帰したら既存キーの警告を解消する`, async (t) => {
+    const f = fixture(t),
+      initial = {
+        workspaceButtonVersion: 1,
+        workspace: { workspaceId: "a", workspaceName: "A" },
+      },
+      k = f.key("x", initial);
+    await f.bind(k);
+    f.disconnect();
+    await tick();
+    assert.match(f.images.at(-1)[1], /取得失敗/);
+    f.setRuntime(runtimeId);
+    f.monitorState({
+      snapshot: { runtimeId, workspaces: [ws("a"), ws("b")], truncated: false },
+      error: null,
+    });
+    await tick();
+    assert.match(f.images.at(-1)[1], /待機/);
+    assert.doesNotMatch(f.images.at(-1)[1], /取得失敗|環境変更/);
+    assert.deepEqual(k.settings, initial);
+    assert.deepEqual(f.effects, []);
+    f.controller.down("x");
+    f.controller.up("x");
+    await f.advance(500);
+    assert.deepEqual(f.effects, [["focus", "a"]]);
+  });
+}
+
+test("押下中の再起動は操作を中止し、警告を解消して同じキーの次の長押しを受け付ける", async (t) => {
+  const f = fixture(t),
+    initial = {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "a", workspaceName: "A" },
+    },
+    k = f.key("x", initial);
+  await f.bind(k);
+  f.controller.down("x");
+  f.setRuntime("restarted");
+  f.monitorState({
+    snapshot: {
+      runtimeId: "restarted",
+      workspaces: [ws("a"), ws("b")],
+      truncated: false,
+    },
+    error: null,
+  });
+  await tick();
+  assert.match(f.images.at(-1)[1], /環境変更/);
+  f.controller.up("x");
+  await f.advance(2_000);
+  assert.deepEqual(f.effects, []);
+  assert.deepEqual(k.settings, initial);
+  assert.match(f.images.at(-1)[1], /待機/);
+  f.setSelected("b");
+  f.controller.down("x");
+  await f.advance(700);
+  f.controller.up("x");
+  assert.equal(k.settings.workspace.workspaceId, "b");
+});
 test("短押し/ダブルは割当先のみを操作、長押しと排他", async (t) => {
   const f = fixture(t),
     k = f.key("x", {

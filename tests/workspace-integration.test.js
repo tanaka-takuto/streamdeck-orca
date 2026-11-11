@@ -512,6 +512,60 @@ test("未割当ボタンは先頭WSを選ばずkeyDownだけでは移動しな�
   assert.deepEqual(f.switches(), []);
 });
 
+test("SDKでOrca再起動後も既存キーの警告を残さず、保存済WSへの移動と長押し再登録ができる", async (t) => {
+  const f = await fixture(t),
+    initial = {
+      workspaceButtonVersion: 1,
+      workspace: { workspaceId: "a", workspaceName: "A" },
+    };
+  f.appear("existing", "key", undefined, initial);
+  await f.wait(imageContains("existing", "進行中"));
+  const start = f.history.length,
+    restarted = snapshot(["a", "b"]);
+  restarted._meta.runtimeId = "restarted-runtime";
+  restarted.result.worktrees[1].isActive = true;
+  f.setSnapshot(restarted);
+  f.send("propertyInspectorDidAppear", "existing", "key");
+  f.send("sendToPlugin", "existing", "key", {
+    type: "get-workspace-button",
+    requestId: "after-restart",
+  });
+  const view = await f.wait(
+    (m) =>
+      m.event === "sendToPropertyInspector" &&
+      m.payload.requestId === "after-restart",
+    start,
+  );
+  assert.deepEqual(view.payload.workspace, initial.workspace);
+  assert.equal(view.payload.ready, true);
+  assert.ok(
+    f.history
+      .slice(start)
+      .every(
+        (m) =>
+          m.event !== "setImage" ||
+          !decodeURIComponent(m.payload.image).includes("環境変更"),
+      ),
+  );
+  assert.deepEqual(f.switches(), []);
+  assert.deepEqual(f.executions(), []);
+  const press = f.history.length;
+  f.send("keyDown", "existing", "key");
+  f.send("keyUp", "existing", "key");
+  await f.wait(imageContains("existing", "移動中"), press);
+  await f.wait(imageContains("existing", "進行中"), f.history.length);
+  assert.equal(f.switches().at(-1)[3], "fresh-a");
+  f.send("keyDown", "existing", "key");
+  await f.wait((m) => m.event === "showOk" && m.context === "existing");
+  f.send("keyUp", "existing", "key");
+  const written = f.history.findLast(
+    (m) => m.event === "setSettings" && m.context === "existing",
+  );
+  assert.equal(written.payload.workspace.workspaceId, "b");
+  assert.equal(f.switches().length, 1);
+  assert.deepEqual(f.executions(), []);
+});
+
 test("SDK長押しはAIなしの画面選択WSを登録し移動せず他ボタンに影響しない", async (t) => {
   const f = await fixture(t),
     initial = {
