@@ -208,3 +208,26 @@ select:focus-visible {
 .reference-list li {
   margin: 9px 0;
 }
+
+.reference-legend {
+  margin: 18px 0;
+  padding-top: 14px;
+  border-top: 1px solid #3b4149;
+}
+.reference-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+}
+.reference-kinds span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.reference-kinds svg {
+  display: block;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  overflow: visible;
+}

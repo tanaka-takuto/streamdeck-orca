@@ -16,6 +16,7 @@ export type KeyIcon =
   | "queue"
   | "input"
   | "pr"
+  | "issue"
   | "waiting"
   | "reply"
   | "spinner"
@@ -31,6 +32,8 @@ const paths: Record<KeyIcon, string> = {
   queue: '<path d="M3 5h13M3 11h9M3 17h9m5-6 5 5-5 5m-4-5h9"/>',
   input: '<path d="M3 4h18v16H3zM7 8h10M7 12h6m2 3 3 2-3 2"/>',
   pr: '<circle cx="6" cy="5" r="3"/><circle cx="6" cy="20" r="3"/><circle cx="20" cy="20" r="3"/><path d="M6 8v9m7-13h3a4 4 0 0 1 4 4v9m-7-13 3-3m-3 3 3 3"/>',
+  issue:
+    '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.75" fill="currentColor" stroke="none"/>',
   waiting:
     '<path d="M2 3h21v15H12l-7 5v-5H2zM12 7v4"/><circle cx="12" cy="14" r=".7"/>',
   reply: '<path d="M2 3h21v15H12l-7 5v-5H2zM7 10h10M7 14h7"/>',
@@ -51,8 +54,9 @@ export const keyIcon = (
   y: number,
   size = 24,
   frame?: number,
+  strokeWidth = 2.2,
 ) =>
-  `<g data-icon="${kind}" transform="translate(${x} ${y}) scale(${size / 24})" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">${frame === undefined ? paths[kind] : `<g transform="rotate(${(frame % 12) * 30} 12 12)">${paths[kind]}</g>`}</g>`;
+  `<g data-icon="${kind}" transform="translate(${x} ${y}) scale(${size / 24})" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round">${frame === undefined ? paths[kind] : `<g transform="rotate(${(frame % 12) * 30} 12 12)">${paths[kind]}</g>`}</g>`;
 export const keyText = (
   value: string,
   x: number,

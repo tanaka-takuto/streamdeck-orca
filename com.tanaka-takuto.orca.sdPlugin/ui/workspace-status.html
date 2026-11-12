@@ -19,6 +19,15 @@
         <li><strong>長押し</strong>：700msで画面選択WSを登録。二押目を長押しした場合も登録だけです。</li>
       </ul>
       <p class="hint">割当はこのボタン専用です。同じWSを登録した他のボタンとも独立しています。長押し登録でWS移動やAI入力は行いません。</p>
+      <section class="reference-legend" aria-label="液晶の関連アイコン">
+        <h2 class="selection-label">液晶の関連アイコン</h2>
+        <div class="reference-kinds">
+          <span><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.75" fill="currentColor" stroke="none"/></svg>左：Issue</span>
+          <span><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="3"/><circle cx="6" cy="20" r="3"/><circle cx="20" cy="20" r="3"/><path d="M6 8v9m7-13h3a4 4 0 0 1 4 4v9m-7-13 3-3m-3 3 3 3"/></svg>右：PR</span>
+        </div>
+        <p class="hint">白＝関連あり、薄色＝関連なし。両方あれば両方が白になります。</p>
+        <p class="hint">?＝未確認、↻＝取得中、!＝取得失敗。↻付きの白・薄色は前回の確認結果です。速い定期更新では、点滅を避けるため更新印を出しません。</p>
+      </section>
       <section class="selection" aria-label="このボタンの割当先">
         <p class="selection-label">割当済みワークスペース</p>
         <p id="workspace-name">取得しています…</p>

@@ -4,14 +4,21 @@ import {
   keyColors,
   keyFrame,
   keyHeader,
+  keyIcon,
   keyName,
   keyProjectText,
   keyStatus,
+  keyText,
 } from "./key-layout";
 import { shorten } from "./key-text";
 import type { OrcaClient } from "./orca/client";
-import { getWorkspaceStatus, type WorkspaceStatus } from "./orca/model";
+import {
+  getWorkspaceStatus,
+  type OrcaSnapshot,
+  type WorkspaceStatus,
+} from "./orca/model";
 import type { MonitorState, WorkspaceMonitor } from "./orca/monitor";
+import type { WorkspaceReferences } from "./orca/workspace-references";
 import {
   ambiguousMessage,
   type KeyContext,
@@ -22,6 +29,8 @@ export type WorkspaceSettings = {
   workspaceId?: string;
   workspaceName?: string;
   controlId?: string;
+  instanceId?: string;
+  hostId?: string;
 };
 export type WorkspaceKey = {
   id: string;
@@ -31,6 +40,8 @@ export type WorkspaceKey = {
 };
 
 type DisplayStatus = WorkspaceStatus | "unassigned";
+type ReferenceIndicators = { issue: boolean; pr: boolean };
+type ReferenceStatus = "unknown" | "loading" | "ready" | "error";
 type Binding = {
   key: WorkspaceKey;
   settings: WorkspaceSettings;
@@ -41,6 +52,12 @@ type Binding = {
   busy: boolean;
   displayed: boolean;
   feedback?: string;
+  references?: ReferenceIndicators;
+  referenceIdentity?: string;
+  referenceVersion: number;
+  referenceStatus: ReferenceStatus;
+  referenceRequest?: Promise<WorkspaceReferences>;
+  referenceTimer?: ReturnType<typeof setTimeout>;
 };
 
 const styles: Record<
@@ -78,12 +95,39 @@ const feedbackLabels: Record<string, [string, KeyIcon]> = {
   "環境変更・再操作": ["環境変更", "warning"],
 };
 
+function referenceIndicators(
+  references: ReferenceIndicators | undefined,
+  status: ReferenceStatus,
+): string {
+  const marker = { unknown: "?", loading: "↻", ready: "", error: "!" }[status];
+  const label = {
+    unknown: "関連先は未確認",
+    loading: "関連先を取得中",
+    ready: "関連先を確認済み",
+    error: "関連先の取得失敗",
+  }[status];
+  return `<g data-reference-status="${status}"><title>${label}</title>${
+    (["issue", "pr"] as const)
+      .map((type, index) => {
+        const state = references
+          ? references[type]
+            ? "linked"
+            : "unlinked"
+          : "unknown";
+        return `<g data-reference="${type}" data-reference-state="${state}" opacity="${state === "linked" ? 1 : 0.3}"><title>${type === "issue" ? "Issue" : "PR"}: ${status === "loading" && references ? "前回は" : ""}${state === "unknown" ? "未確認" : state === "linked" ? "関連あり" : "関連なし"}</title>${keyIcon(type, 44 + index * 34, 93, 22, undefined, 3)}</g>`;
+      })
+      .join("") + keyText(marker, 118, 112, 20, true)
+  }</g>`;
+}
+
 export function keyImage(
   name: string,
   status: DisplayStatus,
   frame = 0,
   context?: KeyContext,
   feedback?: string,
+  references?: ReferenceIndicators,
+  referenceStatus: ReferenceStatus = references ? "ready" : "unknown",
 ): string {
   const style = styles[status];
   const [label, icon] = context?.ambiguous
@@ -102,7 +146,10 @@ export function keyImage(
       keyProjectText(context?.project),
       status === "unassigned" ? "plus" : "folder",
     ) +
-      keyName(status === "unassigned" ? "未割当" : name) +
+      (status === "unassigned"
+        ? keyName("未割当")
+        : keyName(name, 28, 56, 85) +
+          referenceIndicators(references, referenceStatus)) +
       (status === "unassigned" && !feedback
         ? ""
         : keyStatus(label, icon, icon === "spinner" ? frame : undefined)),
@@ -116,9 +163,17 @@ export class WorkspaceButtons {
   private animationTimer?: ReturnType<typeof setInterval>;
   private animationFrame = 0;
   private animationBusy = false;
+  private readonly referenceRequests = new WeakMap<
+    OrcaSnapshot,
+    Map<string, Promise<WorkspaceReferences>>
+  >();
+  private readonly pendingReferences = new Map<
+    string,
+    Promise<WorkspaceReferences>
+  >();
   constructor(
     private readonly monitor: WorkspaceMonitor,
-    private readonly client: Pick<OrcaClient, "focusWorkspace">,
+    private readonly client: Pick<OrcaClient, "focusWorkspace" | "references">,
     private readonly onError: (
       actionId: string,
       message: string,
@@ -133,6 +188,8 @@ export class WorkspaceButtons {
       renderVersion: 0,
       busy: false,
       displayed: false,
+      referenceVersion: 0,
+      referenceStatus: "unknown",
     };
     this.bindings.set(key.id, binding);
     binding.stop = this.monitor.subscribe((state) =>
@@ -144,6 +201,7 @@ export class WorkspaceButtons {
     const binding = this.bindings.get(actionId);
     this.bindings.delete(actionId);
     binding?.stop?.();
+    clearTimeout(binding?.referenceTimer);
     this.updateAnimation();
   }
 
@@ -167,8 +225,117 @@ export class WorkspaceButtons {
         controlId: binding.settings.controlId,
       },
     };
+    this.refreshReferences(binding, state);
     void this.draw(binding);
     this.updateAnimation();
+  }
+
+  private refreshReferences(binding: Binding, state: MonitorState): void {
+    const version = ++binding.referenceVersion;
+    const snapshot = state.snapshot;
+    const rows = snapshot?.workspaces.filter(
+      (row) => row.id === binding.settings.workspaceId,
+    );
+    const workspace = rows?.length === 1 ? rows[0] : undefined;
+    if (
+      !snapshot ||
+      state.error ||
+      state.fromCache ||
+      snapshot.truncated !== false ||
+      snapshot.omittedHosts !== false ||
+      !workspace ||
+      !snapshot.hostIds?.includes(workspace.hostId) ||
+      (binding.settings.instanceId &&
+        binding.settings.instanceId !== workspace.instanceId) ||
+      (binding.settings.hostId && binding.settings.hostId !== workspace.hostId)
+    ) {
+      binding.referenceIdentity = undefined;
+      binding.references = undefined;
+      binding.referenceStatus = state.error ? "error" : "unknown";
+      binding.referenceRequest = undefined;
+      clearTimeout(binding.referenceTimer);
+      return;
+    }
+    const identity = JSON.stringify([
+      snapshot.runtimeId,
+      workspace.id,
+      workspace.instanceId,
+      workspace.hostId,
+    ]);
+    if (binding.referenceIdentity !== identity) {
+      binding.references = undefined;
+      binding.referenceStatus = "unknown";
+      binding.referenceRequest = undefined;
+      clearTimeout(binding.referenceTimer);
+    }
+    binding.referenceIdentity = identity;
+    // 同じ一覧・WSを表示する複数キーは一度の読取を共有する。
+    let requests = this.referenceRequests.get(snapshot);
+    if (!requests) {
+      requests = new Map();
+      this.referenceRequests.set(snapshot, requests);
+    }
+    let request = requests.get(identity);
+    if (!request) {
+      request = this.pendingReferences.get(identity);
+      if (!request) {
+        request = Promise.resolve().then(() =>
+          this.client.references(workspace.id, snapshot.runtimeId),
+        );
+        this.pendingReferences.set(identity, request);
+        const cleanup = () => this.pendingReferences.delete(identity);
+        void request.then(cleanup, cleanup);
+      }
+      requests.set(identity, request);
+    }
+    if (binding.referenceRequest !== request) {
+      binding.referenceRequest = request;
+      clearTimeout(binding.referenceTimer);
+      if (binding.referenceStatus === "unknown") {
+        binding.referenceStatus = "loading";
+      } else if (binding.referenceStatus !== "loading") {
+        // 速い定期更新は点滅させず、長引いた読取だけ前回値に更新印を添える。
+        const pending = request;
+        binding.referenceTimer = setTimeout(() => {
+          if (
+            this.bindings.get(binding.key.id) !== binding ||
+            binding.referenceRequest !== pending
+          )
+            return;
+          binding.referenceStatus = "loading";
+          void this.draw(binding);
+        }, 300);
+        binding.referenceTimer.unref?.();
+      }
+    }
+    const current = () =>
+      this.bindings.get(binding.key.id) === binding &&
+      binding.referenceVersion === version;
+    void request
+      .then((data) => {
+        if (!current()) return;
+        if (
+          data.workspaceId !== workspace.id ||
+          (workspace.instanceId && data.instanceId !== workspace.instanceId) ||
+          data.hostId !== workspace.hostId
+        )
+          throw new Error("関連先の対象を確認できません。");
+        binding.references = {
+          issue: data.references.some((ref) => ref.type === "issue"),
+          pr: data.references.some((ref) => ref.type === "pr"),
+        };
+        clearTimeout(binding.referenceTimer);
+        binding.referenceStatus = "ready";
+        void this.draw(binding);
+      })
+      .catch(() => {
+        if (!current()) return;
+        // 読取失敗は「関連なし」や「未確認」と区別し、次回の定期更新で再確認する。
+        clearTimeout(binding.referenceTimer);
+        binding.references = undefined;
+        binding.referenceStatus = "error";
+        void this.draw(binding);
+      });
   }
 
   private updateAnimation(): void {
@@ -209,6 +376,8 @@ export class WorkspaceButtons {
       this.animationFrame,
       binding.display.context,
       binding.feedback,
+      binding.references,
+      binding.referenceStatus,
     );
     if (binding.desiredImage === image)
       return this.renders.get(binding.key.id) ?? Promise.resolve();

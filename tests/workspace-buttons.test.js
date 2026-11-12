@@ -2,11 +2,29 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadModule } from "./helpers/load-module.js";
 
-const { WorkspaceButtons } = await loadModule("src/workspace-buttons.ts");
+const { WorkspaceButtons, keyImage } = await loadModule(
+  "src/workspace-buttons.ts",
+);
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const snapshot = (workspaces) => ({
-  snapshot: { runtimeId: "r", workspaces, truncated: false },
+  snapshot: {
+    runtimeId: "r",
+    workspaces,
+    truncated: false,
+    omittedHosts: false,
+    hostIds: ["local"],
+  },
   error: null,
+});
+const references = (id, types) => ({
+  workspaceId: id,
+  hostId: "local",
+  references: types.map((type, i) => ({
+    key: `${type}-${i}`,
+    type,
+    url: `https://github.com/acme/app/${type === "pr" ? "pull" : "issues"}/${i + 1}`,
+    label: type,
+  })),
 });
 const workspace = (id, name, state) => ({
   id,
@@ -37,8 +55,10 @@ function fixture(client = { focusWorkspace: async () => true }) {
       };
     },
   };
-  const buttons = new WorkspaceButtons(monitor, client, (id, error) =>
-    errors.push({ id, error }),
+  const buttons = new WorkspaceButtons(
+    monitor,
+    { references: async (id) => references(id, []), ...client },
+    (id, error) => errors.push({ id, error }),
   );
   return {
     buttons,
@@ -53,6 +73,389 @@ function fixture(client = { focusWorkspace: async () => true }) {
     },
   };
 }
+
+test("未確認・初回取得中・失敗・復帰を別表示にし、WSの状態は保つ", async () => {
+  let resolve, reject;
+  const f = fixture({
+    references: () =>
+      new Promise((yes, no) => {
+        resolve = yes;
+        reject = no;
+      }),
+  });
+  f.buttons.bind(f.key, { workspaceId: "a" });
+  await tick();
+  const unknown = f.images.at(-1);
+  assert.match(unknown, /data-reference-status="unknown"/u);
+  f.emit(snapshot([workspace("a", "A", "waiting")]));
+  await tick();
+  const loading = f.images.at(-1);
+  assert.match(loading, /data-reference-status="loading"/u);
+  assert.match(loading, />↻<\/text>/u);
+  reject(Error("offline"));
+  await tick();
+  const failed = f.images.at(-1);
+  assert.match(failed, /data-reference-status="error"/u);
+  assert.match(failed, />!<\/text>/u);
+  assert.doesNotMatch(failed, /data-reference-state="(?:linked|unlinked)"/u);
+  assert.match(failed, /入力待ち/u);
+  assert.notEqual(unknown, loading);
+  assert.notEqual(loading, failed);
+  f.emit(snapshot([workspace("a", "A", "waiting")]));
+  await tick();
+  resolve(references("a", ["issue", "pr"]));
+  await tick();
+  assert.match(f.images.at(-1), /data-reference-status="ready"/u);
+  assert.match(
+    f.images.at(-1),
+    /data-reference="pr" data-reference-state="linked"/u,
+  );
+  f.buttons.unbind(f.key.id);
+});
+
+test("遅い再取得では300ms後に前回値へ更新印を添え、失敗・再試行・復帰を示す", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let reader = async (id) => references(id, ["issue", "pr"]),
+    resolve,
+    reject;
+  const f = fixture({ references: (id) => reader(id) });
+  f.buttons.bind(f.key, { workspaceId: "a" });
+  f.emit(snapshot([workspace("a", "A", "waiting")]));
+  await tick();
+  const ready = f.images.at(-1);
+  reader = () =>
+    new Promise((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+  f.emit(snapshot([workspace("a", "A", "waiting")]));
+  await tick();
+  t.mock.timers.tick(299);
+  await tick();
+  assert.equal(f.images.at(-1), ready);
+  t.mock.timers.tick(1);
+  await tick();
+  assert.match(f.images.at(-1), /data-reference-status="loading"/u);
+  assert.match(
+    f.images.at(-1),
+    /data-reference="pr" data-reference-state="linked"/u,
+  );
+  assert.match(f.images.at(-1), />↻<\/text>/u);
+  f.emit(snapshot([workspace("a", "A", "waiting")]));
+  await tick();
+  assert.match(f.images.at(-1), /data-reference-status="loading"/u);
+  reject(Error("offline"));
+  await tick();
+  const failed = f.images.at(-1);
+  assert.match(failed, /data-reference-status="error"/u);
+  f.emit(snapshot([workspace("a", "A", "waiting")]));
+  await tick();
+  assert.equal(f.images.at(-1), failed);
+  t.mock.timers.tick(300);
+  await tick();
+  assert.match(f.images.at(-1), /data-reference-status="loading"/u);
+  resolve(references("a", []));
+  await tick();
+  assert.match(f.images.at(-1), /data-reference-status="ready"/u);
+  assert.match(
+    f.images.at(-1),
+    /data-reference="pr" data-reference-state="unlinked"/u,
+  );
+  f.buttons.unbind(f.key.id);
+});
+
+test("速い定期更新は更新印を点滅させず、完了後に遅延タイマーも発火しない", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let reader = async (id) => references(id, ["pr"]),
+    resolve;
+  const f = fixture({ references: (id) => reader(id) });
+  f.buttons.bind(f.key, { workspaceId: "a" });
+  f.emit(snapshot([workspace("a", "A", "waiting")]));
+  await tick();
+  const count = f.images.length;
+  reader = () =>
+    new Promise((yes) => {
+      resolve = yes;
+    });
+  f.emit(snapshot([workspace("a", "A", "waiting")]));
+  await tick();
+  t.mock.timers.tick(200);
+  resolve(references("a", ["pr"]));
+  await tick();
+  t.mock.timers.tick(1000);
+  await tick();
+  assert.equal(f.images.length, count);
+  assert.match(f.images.at(-1), /data-reference-status="ready"/u);
+  f.buttons.unbind(f.key.id);
+});
+
+for (const change of [
+  "assignment",
+  "runtime",
+  "incomplete",
+  "offline",
+  "unbind",
+]) {
+  test(`遅い再取得のタイマーを${change}変更後の表示へ漏らさない`, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let reader = async (id) => references(id, ["pr"]);
+    const f = fixture({ references: (id) => reader(id) });
+    f.buttons.bind(f.key, { workspaceId: "a" });
+    f.emit(snapshot([workspace("a", "A", "waiting")]));
+    await tick();
+    reader = () => new Promise(() => {});
+    f.emit(snapshot([workspace("a", "A", "waiting")]));
+    await tick();
+    if (change === "assignment") f.buttons.bind(f.key, {});
+    else if (change === "unbind") f.buttons.unbind(f.key.id);
+    else if (change === "offline") f.emit({ snapshot: null, error: "offline" });
+    else {
+      const next = snapshot([workspace("a", "A", "waiting")]);
+      if (change === "runtime") next.snapshot.runtimeId = "new";
+      else next.snapshot.truncated = true;
+      f.emit(next);
+    }
+    await tick();
+    const count = f.images.length;
+    t.mock.timers.tick(1000);
+    await tick();
+    assert.equal(f.images.length, count);
+    f.buttons.unbind(f.key.id);
+  });
+}
+
+test("Issue/PRの形は小型表示でも線と中心点が潰れにくい寸法にする", () => {
+  const image = decodeURIComponent(
+    keyImage("関連表示の確認", "waiting", 0, { project: "sateto" }, undefined, {
+      issue: true,
+      pr: true,
+    }),
+  );
+  // 72pxでは1/2縮小される。22px原画の図形・太線を確保し、28pxのWS名は保つ。
+  for (const type of ["issue", "pr"]) {
+    assert.match(
+      image,
+      new RegExp(
+        `data-icon="${type}"[^>]*scale\\(0\\.9166666666666666\\)"[^>]*stroke-width="3"`,
+        "u",
+      ),
+    );
+  }
+  assert.match(image, /cx="12" cy="12" r="2\.75"/u);
+  assert.match(image, /font-size="28"/u);
+  assert.match(image, /入力待ち/u);
+});
+
+for (const types of [[], ["issue"], ["pr"], ["issue", "pr"]]) {
+  test(`関連先${JSON.stringify(types)}をIssueとPRの別アイコンへ反映する`, async () => {
+    const f = fixture({ references: async (id) => references(id, types) });
+    f.buttons.bind(f.key, { workspaceId: "a" });
+    f.emit(snapshot([workspace("a", "作業 A", "waiting")]));
+    await tick();
+    const image = f.images.at(-1);
+    for (const type of ["issue", "pr"]) {
+      assert.match(
+        image,
+        new RegExp(
+          `data-reference="${type}" data-reference-state="${types.includes(type) ? "linked" : "unlinked"}"`,
+          "u",
+        ),
+      );
+      assert.match(image, new RegExp(`data-icon="${type}"`, "u"));
+    }
+    assert.match(image, /作業 A/u);
+    assert.match(image, /入力待ち/u);
+    f.buttons.unbind(f.key.id);
+  });
+}
+
+test("関連先の追加・削除を更新し、取得失敗は関連なしと区別して復帰できる", async () => {
+  let types = ["issue"],
+    fail = false;
+  const f = fixture({
+    async references(id) {
+      if (fail) throw Error("offline");
+      return references(id, types);
+    },
+  });
+  f.buttons.bind(f.key, { workspaceId: "a" });
+  const refresh = async () => {
+    f.emit(snapshot([workspace("a", "A", "waiting")]));
+    await tick();
+    return f.images.at(-1);
+  };
+  assert.match(
+    await refresh(),
+    /data-reference="issue" data-reference-state="linked"/u,
+  );
+  types = ["pr"];
+  assert.match(
+    await refresh(),
+    /data-reference="issue" data-reference-state="unlinked"/u,
+  );
+  fail = true;
+  const failed = await refresh();
+  assert.match(failed, /data-reference="pr" data-reference-state="unknown"/u);
+  assert.doesNotMatch(failed, /data-reference-state="unlinked"/u);
+  fail = false;
+  assert.match(
+    await refresh(),
+    /data-reference="pr" data-reference-state="linked"/u,
+  );
+  f.emit({ snapshot: null, error: "offline" });
+  await tick();
+  assert.match(
+    f.images.at(-1),
+    /data-reference="pr" data-reference-state="unknown"/u,
+  );
+  assert.deepEqual(f.errors, []);
+  f.buttons.unbind(f.key.id);
+});
+
+for (const change of ["assignment", "runtime", "instance", "host", "unbind"]) {
+  test(`遅い関連先応答を${change}変更後のキーに反映しない`, async () => {
+    let release;
+    const f = fixture({
+      references: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    });
+    f.buttons.bind(f.key, { workspaceId: "a" });
+    f.emit(snapshot([workspace("a", "A", "waiting")]));
+    await tick();
+    const complete = release;
+    if (change === "assignment") {
+      f.buttons.bind(f.key, { workspaceId: "b" });
+      f.emit(snapshot([workspace("b", "B", "waiting")]));
+    } else if (change === "unbind") {
+      f.buttons.unbind(f.key.id);
+    } else {
+      const next = snapshot([workspace("a", "A", "waiting")]);
+      if (change === "runtime") next.snapshot.runtimeId = "r2";
+      else next.snapshot.workspaces[0][`${change}Id`] = "changed";
+      f.emit(next);
+    }
+    await tick();
+    const count = f.images.length;
+    complete(references("a", ["issue", "pr"]));
+    await tick();
+    assert.equal(f.images.length, count);
+    assert.doesNotMatch(f.images.at(-1), /data-reference-state="linked"/u);
+    f.buttons.unbind(f.key.id);
+  });
+}
+
+for (const mismatch of ["workspaceId", "instanceId", "hostId"]) {
+  test(`関連先応答の${mismatch}不一致を未確認として表示する`, async () => {
+    const f = fixture({
+      references: async (id) => ({
+        ...references(id, ["issue", "pr"]),
+        instanceId: "original",
+        [mismatch]: "wrong",
+      }),
+    });
+    f.buttons.bind(f.key, { workspaceId: "a" });
+    f.emit(
+      snapshot([{ ...workspace("a", "A", "waiting"), instanceId: "original" }]),
+    );
+    await tick();
+    assert.match(
+      f.images.at(-1),
+      /data-reference="issue" data-reference-state="unknown"/u,
+    );
+    assert.doesNotMatch(f.images.at(-1), /data-reference-state="linked"/u);
+    f.buttons.unbind(f.key.id);
+  });
+}
+
+test("未割当・不完全一覧・保存対象と違う実体から関連アイコンを確定しない", async () => {
+  let calls = 0;
+  const f = fixture({
+    references: async (id) => {
+      calls++;
+      return references(id, ["pr"]);
+    },
+  });
+  f.buttons.bind(f.key, {});
+  f.emit(snapshot([workspace("a", "A", "waiting")]));
+  await tick();
+  assert.doesNotMatch(f.images.at(-1), /data-reference=/u);
+  f.buttons.bind(f.key, { workspaceId: "a", instanceId: "original" });
+  for (const extra of [
+    { truncated: true },
+    { omittedHosts: true },
+    { hostIds: [] },
+    { fromCache: true },
+    {},
+  ]) {
+    const state = snapshot([
+      { ...workspace("a", "A", "waiting"), instanceId: "original" },
+    ]);
+    if (extra.fromCache) state.fromCache = true;
+    else Object.assign(state.snapshot, extra);
+    if (!Object.keys(extra).length)
+      state.snapshot.workspaces[0].instanceId = "new";
+    f.emit(state);
+    await tick();
+    assert.match(
+      f.images.at(-1),
+      /data-reference="pr" data-reference-state="unknown"/u,
+    );
+  }
+  assert.equal(calls, 0);
+  f.buttons.unbind(f.key.id);
+});
+
+test("同じ一覧・WSの複数キーは関連先の取得を共有する", async () => {
+  let calls = 0;
+  const f = fixture({
+    references: async (id) => {
+      calls++;
+      return references(id, ["pr"]);
+    },
+  });
+  const state = snapshot([workspace("a", "A", "waiting")]);
+  f.buttons.bind(f.key, { workspaceId: "a" });
+  f.emit(state);
+  await tick();
+  f.buttons.bind({ ...f.key, id: "mirror" }, { workspaceId: "a" });
+  f.emit(state);
+  await tick();
+  assert.equal(calls, 1);
+  assert.match(
+    f.images.at(-1),
+    /data-reference="pr" data-reference-state="linked"/u,
+  );
+  f.buttons.unbind(f.key.id);
+  f.buttons.unbind("mirror");
+});
+
+test("定期更新より遅い関連先読取も重複させず、完了した結果を表示する", async () => {
+  let release,
+    calls = 0;
+  const f = fixture({
+    references: () => {
+      calls++;
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    },
+  });
+  f.buttons.bind(f.key, { workspaceId: "a" });
+  for (let i = 0; i < 3; i++) {
+    f.emit(snapshot([workspace("a", "A", "waiting")]));
+    await tick();
+  }
+  assert.equal(calls, 1);
+  release(references("a", ["issue", "pr"]));
+  await tick();
+  assert.match(
+    f.images.at(-1),
+    /data-reference="issue" data-reference-state="linked"/u,
+  );
+  f.buttons.unbind(f.key.id);
+});
 
 test("選択したワークスペースの入力待ちをキー画像に表示する", async () => {
   const f = fixture();

@@ -857,6 +857,30 @@ const double = async (f) => {
   await tick();
   await tick();
 };
+test("関連アイコンの定期取得はリンクを開かず、ダブル操作は表示済みWSの全件を開く", async (t) => {
+  const f = fixture(t),
+    k = f.key("x", assigned());
+  let data = batchRefs();
+  f.references(async () => data);
+  f.monitorSnapshot(completeSnapshot([ws("a"), ws("b")]));
+  await f.bind(k);
+  for (const type of ["issue", "pr"]) {
+    assert.match(
+      f.images.at(-1)[1],
+      new RegExp(`data-reference="${type}" data-reference-state="linked"`, "u"),
+    );
+  }
+  assert.deepEqual(f.effects, []);
+  await double(f);
+  const opened = batchRefs().references.map((ref) => ["url", ref.url]);
+  assert.deepEqual(f.effects, opened);
+  data = batchRefs("a", []);
+  f.monitorSnapshot(completeSnapshot([ws("a"), ws("b")]));
+  await tick();
+  assert.doesNotMatch(f.images.at(-1)[1], /data-reference-state="linked"/u);
+  assert.deepEqual(f.effects, opened);
+  assert.deepEqual(k.settings, assigned());
+});
 test("ダブルは割当WSのPRとIssueを全件開き、旧選択設定とアクティブWSでは絞らない", async (t) => {
   const f = fixture(t),
     k = f.key("x", assigned());
