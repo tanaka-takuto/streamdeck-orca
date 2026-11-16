@@ -16,6 +16,7 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const uuid = "com.tanaka-takuto.orca";
 const directory = `${uuid}.sdPlugin`;
 const pluginPath = join(root, directory);
+const buildTime = new Date().toISOString();
 const options = {
   absWorkingDir: root,
   entryPoints: ["src/plugin.ts"],
@@ -23,13 +24,22 @@ const options = {
   platform: "node",
   target: "node20",
   format: "cjs",
-  define: { __ORCA_BUILD_TIME__: JSON.stringify(new Date().toISOString()) },
+  define: { __ORCA_BUILD_TIME__: JSON.stringify(buildTime) },
   outfile: `${directory}/bin/plugin.cjs`,
   logLevel: "info",
 };
 
+// 再検証時に同じビルド入力を使い、実行時刻の違いで照合が失敗しないようにする。
+function writeBuildInfo() {
+  writeFileSync(
+    join(pluginPath, "bin/build-info.json"),
+    `${JSON.stringify({ buildTime })}\n`,
+  );
+}
+
 if (!process.argv.includes("--watch")) {
   await build(options);
+  writeBuildInfo();
 } else {
   const pluginsPath =
     process.platform === "darwin"
@@ -95,6 +105,7 @@ if (!process.argv.includes("--watch")) {
               mkdirSync(dirname(file.path), { recursive: true });
               writeFileSync(file.path, file.contents);
             }
+            writeBuildInfo();
             const validated = spawnSync(
               process.execPath,
               [cli, "validate", "--no-update-check", directory],

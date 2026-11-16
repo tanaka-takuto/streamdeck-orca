@@ -312,7 +312,7 @@ test("pack検証は生成物の一致に加え、インストーラー内の実�
   );
   writeFileSync(
     join(directory, "src/plugin.ts"),
-    'console.log("test fixture");',
+    'console.log("test fixture", __ORCA_BUILD_TIME__);',
   );
   const script = resolve("scripts/release.mjs");
   const env = {
@@ -329,13 +329,24 @@ test("pack検証は生成物の一致に加え、インストーラー内の実�
     platform: "node",
     target: "node20",
     format: "cjs",
+    define: { __ORCA_BUILD_TIME__: JSON.stringify("2026-11-16T01:00:00.000Z") },
     outfile: `${plugin}/bin/plugin.cjs`,
     logLevel: "silent",
   });
+  writeFileSync(
+    join(directory, plugin, "bin/build-info.json"),
+    JSON.stringify({ buildTime: "2026-11-16T01:00:00.000Z" }),
+  );
   const archive = `dist/${input.uuid}.streamDeckPlugin`;
   execFileSync(
     "zip",
-    ["-q", archive, `${plugin}/manifest.json`, `${plugin}/bin/plugin.cjs`],
+    [
+      "-q",
+      archive,
+      `${plugin}/manifest.json`,
+      `${plugin}/bin/plugin.cjs`,
+      `${plugin}/bin/build-info.json`,
+    ],
     { cwd: directory },
   );
   execFileSync(process.execPath, [script, "verify"], { cwd: directory, env });

@@ -190,12 +190,20 @@ async function main(mode) {
     throw new Error("Release artifact does not match this workflow run");
   if (mode === "verify") {
     const { build } = await import("esbuild");
+    const buildInfoPath = join(directory, "bin/build-info.json");
+    const { buildTime } = JSON.parse(readFileSync(buildInfoPath, "utf8"));
+    if (
+      typeof buildTime !== "string" ||
+      new Date(buildTime).toISOString() !== buildTime
+    )
+      throw new Error("Invalid bundle build metadata");
     const result = await build({
       entryPoints: ["src/plugin.ts"],
       bundle: true,
       platform: "node",
       target: "node20",
       format: "cjs",
+      define: { __ORCA_BUILD_TIME__: JSON.stringify(buildTime) },
       outfile: join(directory, "bin/plugin.cjs"),
       write: false,
       logLevel: "silent",
@@ -218,9 +226,12 @@ async function main(mode) {
     if (!entries.length) throw new Error("Empty plugin package");
     if (
       !entries.includes(`${directory}/manifest.json`) ||
-      !entries.includes(`${directory}/${manifest.CodePath}`)
+      !entries.includes(`${directory}/${manifest.CodePath}`) ||
+      !entries.includes(buildInfoPath)
     )
-      throw new Error("Required manifest or executable bundle is missing");
+      throw new Error(
+        "Required manifest, executable bundle or build metadata is missing",
+      );
     for (const entry of entries) {
       if (
         !entry.startsWith(`${directory}/`) ||
