@@ -23,6 +23,7 @@ const options = {
   platform: "node",
   target: "node20",
   format: "cjs",
+  define: { __ORCA_BUILD_TIME__: JSON.stringify(new Date().toISOString()) },
   outfile: `${directory}/bin/plugin.cjs`,
   logLevel: "info",
 };

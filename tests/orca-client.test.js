@@ -2,7 +2,33 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadModule } from "./helpers/load-module.js";
 
-const { OrcaClient } = await loadModule("src/orca/client.ts");
+const { OrcaClient, createCliRunner } = await loadModule("src/orca/client.ts");
+
+test("CLI障害のコードと呼出種別を記録し、引数の本文・URLを診断へ複製しない", async () => {
+  const diagnostics = [];
+  const run = createCliRunner(
+    "/nonexistent-streamdeck-orca-test-command",
+    (event, fields) => diagnostics.push({ event, ...fields }),
+  );
+  await assert.rejects(
+    run([
+      "worktree",
+      "ps",
+      "--text",
+      "PRIVATE-BODY",
+      "https://private.example",
+    ]),
+  );
+  const entry = diagnostics.find((row) => row.event === "orca.cli.failed");
+  assert.ok(entry, "CLI障害の診断がない");
+  assert.equal(entry.errorCode, "ENOENT");
+  assert.equal(entry.command, "worktree.ps");
+  assert.equal(entry.reason, "process-error");
+  assert.equal(typeof entry.elapsedMs, "number");
+  const log = JSON.stringify(diagnostics);
+  assert.ok(!log.includes("PRIVATE-BODY"));
+  assert.ok(!log.includes("private.example"));
+});
 const response = (result, runtimeId = "runtime-a") => ({
   ok: true,
   _meta: { runtimeId },

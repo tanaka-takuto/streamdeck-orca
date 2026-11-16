@@ -32,7 +32,8 @@ function fixture(t, saved = {}) {
   const listeners = new Set(),
     effects = [],
     images = [],
-    errors = [];
+    errors = [],
+    diagnostics = [];
   const state = {
     snapshot: {
       runtimeId,
@@ -131,6 +132,8 @@ function fixture(t, saved = {}) {
       await urlHandler?.(url);
     },
     (id, msg) => errors.push([id, msg]),
+    undefined,
+    (event, fields) => diagnostics.push({ event, ...fields }),
   );
   t.after(() => {
     for (const id of keys.keys()) controller.unbind(id);
@@ -141,6 +144,7 @@ function fixture(t, saved = {}) {
     effects,
     images,
     errors,
+    diagnostics,
     async bind(k, s = k.settings) {
       await controller.bind(k, s);
       await tick();
@@ -201,6 +205,59 @@ const completeSnapshot = (workspaces, extra = {}) => ({
   truncated: false,
   omittedHosts: false,
   ...extra,
+});
+
+test("診断は操作ごとのID・対象・runtime・失敗箇所を結び付け、次の操作と混同しない", async (t) => {
+  const f = fixture(t);
+  await f.bind(
+    f.key("x", {
+      workspaceButtonVersion: 1,
+      workspace: {
+        workspaceId: "a",
+        workspaceName: "PRIVATE-NAME",
+        instanceId: "a",
+        hostId: "local",
+      },
+    }),
+  );
+  const failure = Object.assign(
+    new Error("PRIVATE-BODY https://private.example/token"),
+    { code: "ECONNRESET" },
+  );
+  f.snapshot(async () => {
+    throw failure;
+  });
+  f.controller.down("x");
+  f.controller.up("x");
+  await f.advance(500);
+  const failed = f.diagnostics.find(
+    (entry) => entry.event === "workspace.gesture.failed",
+  );
+  assert.ok(failed, "例外の診断記録がない");
+  assert.equal(failed.workspaceId, "a");
+  assert.equal(failed.instanceId, "a");
+  assert.equal(failed.hostId, "local");
+  assert.equal(failed.runtimeId, "r");
+  assert.equal(failed.errorCode, "ECONNRESET");
+  assert.ok(failed.errorFrames.includes("workspace-status-controller.test.js"));
+  assert.ok(failed.operationId);
+  assert.equal(failed.phase, "移動中");
+  const finished = f.diagnostics.find(
+    (entry) => entry.event === "workspace.gesture.finished",
+  );
+  assert.equal(finished.operationId, failed.operationId);
+  assert.equal(finished.outcome, "failed");
+  f.controller.down("x");
+  f.controller.up("x");
+  await f.advance(500);
+  const starts = f.diagnostics.filter(
+    (entry) => entry.event === "workspace.gesture.started",
+  );
+  assert.equal(starts.length, 2);
+  assert.notEqual(starts[0].operationId, starts[1].operationId);
+  const log = JSON.stringify(f.diagnostics);
+  for (const secret of ["PRIVATE-NAME", "PRIVATE-BODY", "private.example"])
+    assert.ok(!log.includes(secret));
 });
 
 test("削除を確認したWSのキーだけ割当と関連先を解除し、再表示後も未割当から長押し登録できる", async (t) => {

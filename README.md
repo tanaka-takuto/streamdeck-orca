@@ -130,6 +130,10 @@ WS状態の定期更新に合わせて関連先も再取得します。同じWS�
 
 Mac・Orca・プラグインの再起動後も、ボタンに保存した割当を使います。待機中のOrca再起動だけで「環境変更」は表示せず、起動時の接続失敗も正常取得後に通常表示へ戻します。旧形式の割当を起動時に読み込めなかった場合も、正常接続後に読込を再試行します。操作途中に実行環境が変わった場合はその操作を中止して一時的に「環境変更」を表示し、表示復帰後の操作を受け付けます。キーの作り直しは不要です。
 
+Stream Deckの切断時は保留中の操作を取り消し、再接続時は現在表示されている状態キーの保存設定を読み直します。再接続だけで移動・リンク起動・再登録は行わず、次のキー操作から受け付けます。ページを離れたキーは遅い設定応答で復活させません。
+
+起動時にStream Deckが通知した機器一覧を接続状態の初期値に使い、その後は明示的な接続・切断通知で更新します。SDKの `isConnected` の初期値が `false` でも、切断通知を受けていない起動時のキーを無効にしません。
+
 画面選択は `worktree ps` の `isActive` を利用します。CLIを実行するディレクトリやAIペインの選択は使いません。登録直前にも選択WS・runtimeId・WSの実体を再照合します。ローカルOrcaのWSが登録対象です。既存のAI入力アクションは引き続きAIターミナル・ペインを厳密に検証します。
 
 CLI は環境変数 `ORCA_CLI_COMMAND`、PATH、macOS の `/opt/homebrew/bin`・`/usr/local/bin` から実行前に選びます。接続失敗で別ビルドへ切り替えません。ターミナルなしのWS移動は既存の認証済みローカルRPC `worktree.activate` を利用します。実機キーの操作感・物理画面の描画・実Orcaでの登録と移動・既定ブラウザー起動は未検証です。SDKへの画像送信完了は実機描画完了の保証ではありません。
@@ -188,6 +192,34 @@ npm run dev
 ビルドと公式 CLI の検証が成功した場合だけ再起動します。構文エラーや不正な manifest がある場合は再起動せず、修正して保存すると再開します。型チェックは `npm run typecheck` で実行します。終了は `Ctrl+C` です。
 
 開発用リンクを確認できない場合、`dev` は理由を表示して終了します。通常インストールしたコピーを誤って再起動して、変更が反映されたように見せることを防ぎます。
+
+## 操作できない場合の診断ログ
+
+プラグインのログはインストール先に自動作成され、通常の利用者にソースコードや開発用ディレクトリは不要です。
+
+- macOS: `~/Library/Application Support/com.elgato.StreamDeck/Plugins/com.tanaka-takuto.orca.sdPlugin/logs/`
+- Windows: `%APPDATA%\Elgato\StreamDeck\Plugins\com.tanaka-takuto.orca.sdPlugin\logs\`
+- 開発用リンク: 上記インストール先はリポジトリへのリンクになるため、実体はリポジトリ内の `com.tanaka-takuto.orca.sdPlugin/logs/` です。
+
+Finderの「移動 → フォルダへ移動」にmacOSのパスを入力するか、Windowsのエクスプローラーのアドレス欄にWindowsのパスを入力すると開けます。最新は `com.tanaka-takuto.orca.0.log`、過去分は `.1.log` 以降です。起動ログの `logDirectory` に実際の保存先も記録します。macOSのStream Deck本体のログは `~/Library/Logs/ElgatoStreamDeck/StreamDeck.log`、プラグインの起動・終了の記録は同じフォルダーの `com.tanaka-takuto.orca0.log` などにあります。
+
+ローテーションは同梱SDK 2.1.2の既定実装を使います。プラグイン起動時と `maxSize: 50 * 1024 * 1024` 到達時に世代を更新し、現在分を含め最大10ファイルを保持して古い分を削除します。SDKはサイズを文字列長で数えるため、厳密な50MiBのバイト上限ではありません。日数による保持保証はなく、再起動を繰り返すだけでも古い世代が削除されるため、調査時はフォルダー内の全世代を保存してください。
+
+プラグイン側には起動時刻・ビルド時刻・PID・Stream Deck/Nodeのバージョン、機器の初期登録・接続・切断、状態キーの表示と登録、押下と解放、入力を無視した理由、ジェスチャーの開始・処理段階・終了結果・所要時間を通常のINFOレベルで記録します。`sdkConnected` はSDKの値、内部登録時の `connected` は初期一覧と接続通知から判断した値です。
+
+各記録の `sessionId` と `sequence` でプロセスの再起動と発生順を、`actionId`・`bindingId`・`operationId` でキーの登録世代と一回の操作を区別します。操作中の非同期CLI呼出にも同じ操作IDが付き、個々の呼出を `cliRequestId` と `orca.cli.started` / `orca.cli.finished` / `orca.cli.failed` でたどれます。対象の `workspaceId`・`instanceId`・`hostId`・`runtimeId` と失敗時の `phase`、例外の種別・コード・関数/ファイル/行を残します。CLIの障害には呼出種別、エラーコード、シグナル、強制終了の有無、所要時間、stdout/stderrのバイト数を記録します。定期更新の正常なCLI呼出は記録せず、障害が起きた場合だけ記録します。その場合、キー操作IDはありません。
+
+追加した診断記録には設定全体・入力本文・認証情報・WSの表示名・URL・CLIの生出力を複製しません。例外本文はそのまま出さず、スタックもファイル名と行番号を残します。ただし、識別用のWS ID自体にパスが含まれる場合や、既存の警告・エラーメッセージに対象情報が含まれる場合があります。
+
+反応がない場合は、再起動前に時刻とログを保存すると、次のように切り分けられます。
+
+- `workspace.key.down` / `workspace.key.up` がない: プラグインのキー操作ハンドラーまで届いていません。
+- `workspace.input.ignored` がある: `reason` の `unbound`（内部登録なし）・`not-ready`（初期化未完了）・`disconnected`（機器切断）・`busy`（処理中）を確認します。
+- `workspace.gesture.input-ignored` がある: `already-held`（押下済み）・`not-held`（対応する押下なし）・`busy`（処理中）・`consumed`（長押し成立済み/取り消し済み）を確認します。`workspace.gesture.cancelled` は取り消した時点の押下・判定待ち・実行中の有無を残します。
+- `workspace.gesture.started` の後に終了がない: 最後の `workspace.feedback` の `phase` と、機器の切断・表示の離脱を確認します。終了結果の `cancelled` は取り消し、`unconfirmed` はリンク要求の結果不明を表し、自動再送しません。
+- 再接続後は `workspace.reconnect.settings-requested` → `workspace.settings-received` → `workspace.binding.ready` が復旧の目印です。`workspace.reconnect.settings-failed` があれば設定読込に失敗しています。
+
+これらは入力受付、判定・処理中の停止箇所、CLI障害、再接続の切り分けを対象にしています。プロセスが固まった場合とSDKへイベントが届かない場合の区別には、Stream Deck本体のログやOS側のプロセス調査も必要です。実機の描画やブラウザーでの表示完了も、このログだけでは確認できません。
 
 ## Git フック
 

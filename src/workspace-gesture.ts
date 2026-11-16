@@ -1,3 +1,4 @@
+import type { Diagnostic } from "./diagnostics";
 /** Release-to-second-down interval; the second press may itself become a hold. */
 export const DOUBLE_CLICK_MS = 500;
 export const LONG_PRESS_MS = 700;
@@ -16,12 +17,21 @@ export class WorkspaceGesture {
       current: () => boolean,
     ) => Promise<void>,
     private readonly feedback: (message: string) => void,
+    private readonly diagnostic: Diagnostic = () => {},
   ) {}
   down(): void {
-    if (this.held) return;
+    if (this.held) {
+      this.diagnostic("workspace.gesture.input-ignored", {
+        reason: "already-held",
+      });
+      return;
+    }
     this.held = true;
     this.consumed = this.busy;
-    if (this.busy) return;
+    if (this.busy) {
+      this.diagnostic("workspace.gesture.input-ignored", { reason: "busy" });
+      return;
+    }
     this.second = this.click !== undefined;
     clearTimeout(this.click);
     this.click = undefined;
@@ -32,10 +42,20 @@ export class WorkspaceGesture {
     }, LONG_PRESS_MS);
   }
   up(): void {
-    if (!this.held) return;
+    if (!this.held) {
+      this.diagnostic("workspace.gesture.input-ignored", {
+        reason: "not-held",
+      });
+      return;
+    }
     this.held = false;
     clearTimeout(this.hold);
-    if (this.consumed || this.busy) return;
+    if (this.consumed || this.busy) {
+      this.diagnostic("workspace.gesture.input-ignored", {
+        reason: this.busy ? "busy" : "consumed",
+      });
+      return;
+    }
     if (this.second) this.run("double");
     else {
       this.feedback("移動待ち");
@@ -47,6 +67,12 @@ export class WorkspaceGesture {
   }
   cancel(): boolean {
     const interrupted = this.held || this.click !== undefined || this.busy;
+    if (interrupted)
+      this.diagnostic("workspace.gesture.cancelled", {
+        held: this.held,
+        pendingClick: this.click !== undefined,
+        busy: this.busy,
+      });
     ++this.revision;
     clearTimeout(this.hold);
     clearTimeout(this.click);

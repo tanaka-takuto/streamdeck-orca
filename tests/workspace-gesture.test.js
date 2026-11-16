@@ -132,3 +132,28 @@ test("別ボタンの短押しと長押しの判定を分離", async (t) => {
     ["long"],
   );
 });
+
+test("ジェスチャー内部で無視した押下・解放にも具体的な理由を記録する", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const events = [];
+  const g = new WorkspaceGesture(
+    async () => {},
+    () => {},
+    (event, fields) => events.push({ event, ...fields }),
+  );
+  t.after(() => g.cancel());
+  g.up();
+  g.down();
+  g.down();
+  g.cancel();
+  g.up();
+  assert.deepEqual(
+    events
+      .filter((entry) => entry.event === "workspace.gesture.input-ignored")
+      .map((entry) => entry.reason),
+    ["not-held", "already-held", "consumed"],
+  );
+  assert.ok(
+    events.some((entry) => entry.event === "workspace.gesture.cancelled"),
+  );
+});

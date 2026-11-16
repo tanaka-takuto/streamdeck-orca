@@ -1,3 +1,6 @@
+import { diagnosticContext } from "./diagnostic-context";
+import { errorDetails } from "./diagnostic-error";
+import type { Diagnostic, DiagnosticFields } from "./diagnostics";
 import type { OrcaClient } from "./orca/client";
 import {
   getWorkspaceStatus,
@@ -48,6 +51,9 @@ type LinkResult = {
   total: number;
 };
 type Binding = {
+  bindingId: number;
+  operationId?: number;
+  phase?: string;
   key: Key;
   settings: WorkspaceButtonSettings;
   gesture: WorkspaceGesture;
@@ -112,6 +118,9 @@ const workspaceMissing = (
 
 export class WorkspaceStatusController {
   private readonly bindings = new Map<string, Binding>();
+  private readonly deviceConnections = new Map<string, boolean>();
+  private bindingSequence = 0;
+  private operationSequence = 0;
   private readonly buttons: WorkspaceButtons;
   private navigationVersion = 0;
   private readonly saves = new Map<string, Promise<void>>();
@@ -125,6 +134,7 @@ export class WorkspaceStatusController {
       const revision = ++this.navigationVersion;
       return () => revision === this.navigationVersion;
     },
+    private readonly diagnostic: Diagnostic = () => {},
   ) {
     this.buttons = new WorkspaceButtons(monitor, client, report);
   }
@@ -133,23 +143,37 @@ export class WorkspaceStatusController {
     const previous = this.bindings.get(key.id);
     if (
       previous &&
+      previous.key === key &&
+      (previous.ready || previous.initializing) &&
       (same(previous.pending, settings) || same(previous.settings, settings))
     )
       return;
     this.unbind(key.id);
     const b: Binding = {
+      bindingId: ++this.bindingSequence,
       key,
       settings: structuredClone(settings),
       ready: false,
       gesture: new WorkspaceGesture(
-        (kind, current) => this.execute(b, kind, current),
+        (kind, current) => {
+          const operationId = ++this.operationSequence;
+          return diagnosticContext.run(
+            { actionId: key.id, bindingId: b.bindingId, operationId },
+            () => this.execute(b, kind, current, operationId),
+          );
+        },
         (message) => this.feedback(b, message),
+        (event, fields) => this.trace(b, event, fields),
       ),
     };
     this.bindings.set(key.id, b);
+    this.trace(b, "workspace.binding.created", {
+      assigned: !!settings.workspace,
+    });
     this.draw(b);
     b.stop = this.monitor.subscribe((state) => {
       if (state.error) {
+        if (!b.monitorFailed) this.trace(b, "workspace.monitor.failed");
         b.gesture.cancel();
         b.monitorFailed = true;
         this.feedback(b, "取得失敗");
@@ -159,9 +183,15 @@ export class WorkspaceStatusController {
       // 再起動後も保存済み割当を使う。環境変更の警告は中止した操作にだけ出す。
       if (b.runtimeId && b.runtimeId !== state.snapshot.runtimeId) {
         const interrupted = b.gesture.cancel();
+        this.trace(b, "workspace.runtime.changed", {
+          previousRuntimeId: b.runtimeId,
+          nextRuntimeId: state.snapshot.runtimeId,
+          interrupted,
+        });
         if (interrupted) this.feedback(b, "環境変更・再操作", true);
         else if (b.monitorFailed) this.feedback(b);
       } else if (b.monitorFailed) this.feedback(b);
+      if (b.monitorFailed) this.trace(b, "workspace.monitor.recovered");
       b.monitorFailed = false;
       b.runtimeId = state.snapshot.runtimeId;
       if (b.retryInitialization && !state.fromCache) void this.initialize(b);
@@ -197,7 +227,10 @@ export class WorkspaceStatusController {
           next.workspace = { ...legacy };
         await this.save(b, next, () => this.current(b));
       }
-      if (this.current(b)) b.ready = true;
+      if (this.current(b)) {
+        b.ready = true;
+        this.trace(b, "workspace.binding.ready");
+      }
     } catch (error) {
       this.fail(b, error, "保存失敗");
     } finally {
@@ -269,18 +302,51 @@ export class WorkspaceStatusController {
   unbind(id: string): void {
     const b = this.bindings.get(id);
     this.bindings.delete(id);
-    b?.gesture.cancel();
+    if (b)
+      this.trace(b, "workspace.binding.removed", {
+        interrupted: b.gesture.cancel(),
+      });
     b?.stop?.();
     clearTimeout(b?.feedbackTimer);
     this.buttons.unbind(id);
   }
   disconnect(deviceId: string): void {
+    this.deviceConnections.set(deviceId, false);
     for (const [id, b] of this.bindings)
       if (b.key.device?.id === deviceId) this.unbind(id);
   }
+  connect(deviceId: string): void {
+    this.deviceConnections.set(deviceId, true);
+  }
+  private deviceConnected(key: Key): boolean {
+    return key.device
+      ? (this.deviceConnections.get(key.device.id) ??
+          key.device.isConnected !== false)
+      : true;
+  }
   down(id: string): void {
     const b = this.bindings.get(id);
-    if (!b?.ready || b.key.device?.isConnected === false || b.operating) return;
+    const reason = !b
+      ? "unbound"
+      : !b.ready
+        ? "not-ready"
+        : !this.deviceConnected(b.key)
+          ? "disconnected"
+          : b.operating
+            ? "busy"
+            : undefined;
+    if (reason) {
+      const fields = {
+        reason,
+        operating: b?.operating,
+      };
+      if (b) this.trace(b, "workspace.input.ignored", fields);
+      else
+        this.diagnostic("workspace.input.ignored", { actionId: id, ...fields });
+      return;
+    }
+    if (!b) return;
+    this.trace(b, "workspace.input.accepted");
     try {
       this.buttons.assertReady(id);
       b.pressReady = true;
@@ -293,9 +359,28 @@ export class WorkspaceStatusController {
     this.bindings.get(id)?.gesture.up();
   }
   private current(b: Binding): boolean {
-    return (
-      this.bindings.get(b.key.id) === b && b.key.device?.isConnected !== false
-    );
+    return this.bindings.get(b.key.id) === b && this.deviceConnected(b.key);
+  }
+  private trace(
+    b: Binding,
+    event: string,
+    fields: DiagnosticFields = {},
+  ): void {
+    this.diagnostic(event, {
+      actionId: b.key.id,
+      deviceId: b.key.device?.id,
+      bindingId: b.bindingId,
+      operationId: b.operationId,
+      workspaceId: b.settings.workspace?.workspaceId,
+      instanceId: b.settings.workspace?.instanceId,
+      hostId: b.settings.workspace?.hostId,
+      runtimeId: b.runtimeId,
+      ready: b.ready,
+      connected: this.deviceConnected(b.key),
+      sdkConnected: b.key.device?.isConnected,
+      phase: b.phase,
+      ...fields,
+    });
   }
   private draw(b: Binding): void {
     this.buttons.bind(
@@ -305,6 +390,8 @@ export class WorkspaceStatusController {
   }
   private feedback(b: Binding, message?: string, temporary = false): void {
     if (!this.current(b)) return;
+    b.phase = message ?? "idle";
+    this.trace(b, "workspace.feedback");
     clearTimeout(b.feedbackTimer);
     this.buttons.feedback(b.key.id, message);
     if (temporary) {
@@ -313,6 +400,7 @@ export class WorkspaceStatusController {
     }
   }
   private fail(b: Binding, error: unknown, category = "取得失敗"): void {
+    this.trace(b, "workspace.error", { category, ...errorDetails(error) });
     if (!this.current(b)) return;
     const message =
       error instanceof Error ? error.message : "Orca の情報を取得できません。";
@@ -412,6 +500,7 @@ export class WorkspaceStatusController {
     b: Binding,
     kind: WorkspaceGestureKind,
     gestureCurrent: () => boolean,
+    operationId: number,
   ): Promise<void> {
     if (b.operating) return;
     b.operating = kind;
@@ -431,6 +520,10 @@ export class WorkspaceStatusController {
       (!runtimeId ||
         !this.monitor.state.snapshot ||
         this.monitor.state.snapshot.runtimeId === runtimeId);
+    const started = Date.now();
+    let failed = false;
+    b.operationId = operationId;
+    this.trace(b, "workspace.gesture.started", { kind });
     try {
       if (!current()) return;
       if (kind === "long") {
@@ -593,9 +686,32 @@ export class WorkspaceStatusController {
         }
       }
     } catch (error) {
+      failed = true;
+      this.trace(b, "workspace.gesture.failed", {
+        kind,
+        ...errorDetails(error),
+      });
       if (current())
         this.fail(b, error, kind === "long" ? "登録失敗" : "取得失敗");
     } finally {
+      this.trace(b, "workspace.gesture.finished", {
+        kind,
+        elapsedMs: Date.now() - started,
+        outcome: !current()
+          ? "cancelled"
+          : failed
+            ? "failed"
+            : b.linkResult?.unconfirmed.length && kind === "double"
+              ? "unconfirmed"
+              : "completed",
+        requested:
+          kind === "double" ? b.linkResult?.requested.length : undefined,
+        unconfirmed:
+          kind === "double" ? b.linkResult?.unconfirmed.length : undefined,
+        notRequested:
+          kind === "double" ? b.linkResult?.notRequested.length : undefined,
+      });
+      b.operationId = undefined;
       b.operating = undefined;
       void this.unassignMissing(b);
     }

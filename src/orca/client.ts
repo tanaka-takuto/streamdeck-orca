@@ -1,11 +1,14 @@
 import { execFile } from "node:child_process";
 import { accessSync, constants } from "node:fs";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import {
   type AttentionTarget,
   attentionWorkspace,
   matchesAttentionTarget,
 } from "../attention";
+import { diagnosticContext } from "../diagnostic-context";
+import { errorDetails } from "../diagnostic-error";
+import type { Diagnostic } from "../diagnostics";
 import { parseWorkspaceSelection } from "./active-selection";
 import {
   type OrcaSnapshot,
@@ -23,6 +26,7 @@ import {
 import { parseReferences } from "./workspace-references";
 
 export type CliRunner = (args: string[]) => Promise<unknown>;
+let cliRequestSequence = 0;
 
 export function resolveOrcaCommand(): string {
   if (process.env.ORCA_CLI_COMMAND) return process.env.ORCA_CLI_COMMAND;
@@ -49,9 +53,33 @@ export function resolveOrcaCommand(): string {
   return name;
 }
 
-export function createCliRunner(command = resolveOrcaCommand()): CliRunner {
+export function createCliRunner(
+  command = resolveOrcaCommand(),
+  diagnostic: Diagnostic = () => {},
+): CliRunner {
   return (args) =>
     new Promise((resolve, reject) => {
+      const started = Date.now();
+      const cliRequestId = ++cliRequestSequence;
+      const traceOperation = !!diagnosticContext.getStore();
+      const requested = args.slice(0, 2).join(".");
+      const commandKind =
+        args[0] === "status"
+          ? "status"
+          : [
+                "worktree.ps",
+                "reference.list",
+                "terminal.list",
+                "terminal.switch",
+              ].includes(requested)
+            ? requested
+            : "other";
+      if (traceOperation)
+        diagnostic("orca.cli.started", {
+          cliRequestId,
+          command: commandKind,
+          executable: basename(command),
+        });
       execFile(
         command,
         args,
@@ -61,17 +89,54 @@ export function createCliRunner(command = resolveOrcaCommand()): CliRunner {
           maxBuffer: 8 * 1024 * 1024,
           windowsHide: true,
         },
-        (error, stdout) => {
+        (error, stdout, stderr) => {
+          const details = {
+            cliRequestId,
+            command: commandKind,
+            executable: basename(command),
+            elapsedMs: Date.now() - started,
+            stdoutBytes: Buffer.byteLength(stdout),
+            stderrBytes: Buffer.byteLength(stderr),
+            killed: error?.killed,
+            signal: error?.signal ?? undefined,
+          };
           try {
             const result: unknown = JSON.parse(stdout);
             if (error && object(result).ok !== false) throw error;
+            if (
+              result &&
+              typeof result === "object" &&
+              "ok" in result &&
+              result.ok === false
+            ) {
+              const apiError = "error" in result ? result.error : undefined;
+              diagnostic("orca.cli.failed", {
+                ...details,
+                reason: "orca-error",
+                ...(error ? errorDetails(error) : {}),
+                apiCode:
+                  apiError &&
+                  typeof apiError === "object" &&
+                  "code" in apiError &&
+                  typeof apiError.code === "string" &&
+                  /^[\w.-]{1,80}$/u.test(apiError.code)
+                    ? apiError.code
+                    : undefined,
+              });
+            } else if (traceOperation) diagnostic("orca.cli.finished", details);
             resolve(result);
-          } catch {
+          } catch (parseError) {
+            diagnostic("orca.cli.failed", {
+              ...details,
+              reason: error ? "process-error" : "invalid-json",
+              ...errorDetails(error ?? parseError),
+            });
             reject(
               new Error(
                 error && "code" in error && error.code === "ENOENT"
                   ? "Orca CLI が見つかりません。Orca の設定で CLI を有効にしてください。"
                   : "Orca の応答を取得できません。Orca が起動しているか確認してください。",
+                { cause: error ?? parseError },
               ),
             );
           }

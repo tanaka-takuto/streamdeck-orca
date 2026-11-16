@@ -6,6 +6,7 @@ import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -128,7 +129,7 @@ const snapshot = (ids, waitingIds = []) =>
     truncated: false,
   });
 
-async function fixture(t, saved = {}) {
+async function fixture(t, saved = {}, connect = true) {
   const directory = mkdtempSync(join(tmpdir(), "streamdeck-orca-sdk-"));
   const dataPath = join(directory, "snapshot.json");
   const switchesPath = join(directory, "switches.jsonl");
@@ -152,7 +153,7 @@ else if (args[0] === 'reference' && args[1] === 'list') {
  const row = data.result.worktrees.find(w => w.worktreeId === id);
  console.log(JSON.stringify({ok:true,_meta:data._meta,result:{worktree:{id,hostId:row?.hostId,instanceId:row?.instanceId},references:data.testReferences?.[id]??[]}}));
 }
-else if (args[0] === 'worktree') setTimeout(() => console.log(JSON.stringify(data)), data.testDelayMs || 0);
+else if (args[0] === 'worktree') setTimeout(() => console.log(data.testInvalidWorktreeResponse ? 'invalid-json' : JSON.stringify(data)), data.testDelayMs || 0);
 else if (args[1] === 'list') {
  const id = args[args.indexOf('--worktree') + 1].slice(3);
  console.log(JSON.stringify({ok:true,_meta:data._meta,result:{hostScope:{hostIds:['local'],omittedHostIds:[]},truncated:false,topologyRevisions:{[id]:1},visualLayouts:[{worktreeId:id,root:{type:'group',tabs:[{tabId:'tab',panes:{type:'terminal',handle:'fresh-'+id,tabId:'tab',leafId:id}}]}}],terminals:[{handle:'fresh-'+id,incarnationId:'inc-'+id,agentIdentity:'codex',title:'Codex '+id,worktreeId:id,tabId:'tab',leafId:id,executionHostId:'local',connected:true,writable:true,orphaned:false}]}}));
@@ -183,6 +184,8 @@ else if (args[1] === 'list') {
   const history = [];
   const actionSettings = new Map();
   const waits = new Set();
+  const pendingSettings = [];
+  let holdSettings = false;
   let socket;
   let settings = saved;
   server.on("connection", (connected) => {
@@ -192,16 +195,20 @@ else if (args[1] === 'list') {
       history.push(message);
       if (message.event === "setSettings")
         actionSettings.set(message.context, message.payload);
-      if (message.event === "getSettings")
-        socket.send(
-          JSON.stringify({
-            event: "didReceiveSettings",
-            action: actions.key,
-            context: message.context,
-            device,
-            payload: { settings: actionSettings.get(message.context) ?? {} },
-          }),
-        );
+      if (message.event === "getSettings") {
+        const reply = () =>
+          socket.send(
+            JSON.stringify({
+              event: "didReceiveSettings",
+              action: actions.key,
+              context: message.context,
+              device,
+              payload: { settings: actionSettings.get(message.context) ?? {} },
+            }),
+          );
+        if (holdSettings) pendingSettings.push(reply);
+        else reply();
+      }
       if (message.event === "getGlobalSettings")
         socket.send(
           JSON.stringify({
@@ -269,17 +276,44 @@ else if (args[1] === 'list') {
       check();
     });
   await wait((message) => message.event === "registerPlugin");
-  socket.send(
-    JSON.stringify({
-      event: "deviceDidConnect",
-      device,
-      deviceInfo: info.devices[0],
-    }),
-  );
+  if (connect)
+    socket.send(
+      JSON.stringify({
+        event: "deviceDidConnect",
+        device,
+        deviceInfo: info.devices[0],
+      }),
+    );
   return {
     directory,
     wait,
     history,
+    deviceEvent(event) {
+      socket.send(
+        JSON.stringify({ event, device, deviceInfo: info.devices[0] }),
+      );
+    },
+    setActionSettings(context, value) {
+      actionSettings.set(context, value);
+    },
+    holdSettings() {
+      holdSettings = true;
+    },
+    releaseSettings() {
+      holdSettings = false;
+      for (const reply of pendingSettings.splice(0)) reply();
+    },
+    logs() {
+      const path = join(directory, "logs");
+      try {
+        return readdirSync(path)
+          .filter((name) => name.endsWith(".log"))
+          .map((name) => readFileSync(join(path, name), "utf8"))
+          .join("\n");
+      } catch {
+        return "";
+      }
+    },
     get settings() {
       return settings;
     },
@@ -611,6 +645,210 @@ test("SDKでOrca再起動後も既存キーの警告を残さず、保存済WS�
   assert.deepEqual(f.executions(), []);
 });
 
+test("SDKでキー表示が機器接続より先でも接続後に同じ設定のキーを操作できる", async (t) => {
+  const f = await fixture(t, {}, false);
+  f.appear("early", "key", undefined, {
+    workspaceButtonVersion: 1,
+    workspace: { workspaceId: "a", workspaceName: "A" },
+  });
+  await f.wait(imageContains("early", "進行中"));
+  const start = f.history.length;
+  f.deviceEvent("deviceDidConnect");
+  await f.wait(
+    (m) => m.event === "getSettings" && m.context === "early",
+    start,
+  );
+  await f.wait(imageContains("early", "進行中"), start);
+  const press = f.history.length;
+  f.send("keyDown", "early", "key");
+  f.send("keyUp", "early", "key");
+  await f.wait(imageContains("early", "移動中"), press);
+  await f.wait(imageContains("early", "進行中"), f.history.length);
+  assert.equal(f.switches().at(-1)[3], "fresh-a");
+});
+
+test("SDKの起動時に機器接続イベントがなくても、可視キーは初期化され短押し・長押しを受け付ける", async (t) => {
+  const f = await fixture(t, {}, false);
+  const snap = snapshot(["a", "b"]);
+  snap.result.worktrees[1].isActive = true;
+  f.setSnapshot(snap);
+  f.appear("initial-device", "key", undefined, {
+    workspaceButtonVersion: 1,
+    workspace: { workspaceId: "a", workspaceName: "A" },
+  });
+  await f.wait(imageContains("initial-device", "進行中"));
+  const start = f.history.length;
+  f.send("keyDown", "initial-device", "key");
+  f.send("keyUp", "initial-device", "key");
+  await f.wait(imageContains("initial-device", "移動中"), start);
+  await f.wait(imageContains("initial-device", "進行中"), f.history.length);
+  assert.equal(f.switches().at(-1)[3], "fresh-a");
+  const hold = f.history.length;
+  f.send("keyDown", "initial-device", "key");
+  await f.wait(
+    (m) => m.event === "showOk" && m.context === "initial-device",
+    hold,
+  );
+  f.send("keyUp", "initial-device", "key");
+  assert.equal(
+    f.history.findLast((m) => m.event === "setSettings").payload.workspace
+      .workspaceId,
+    "b",
+  );
+  assert.equal(f.switches().length, 1);
+  assert.deepEqual(f.executions(), []);
+});
+
+test("SDKの機器再接続で再表示イベントなしでも復旧し、切断前の押下を実行せず最新割当へ移動・リンク・再登録できる", async (t) => {
+  const f = await fixture(t);
+  const initial = {
+    workspaceButtonVersion: 1,
+    workspace: { workspaceId: "a", workspaceName: "A" },
+  };
+  const snap = snapshot(["a", "b"]);
+  snap.result.worktrees[0].isActive = true;
+  snap.testReferences = {
+    b: [
+      {
+        key: "b-pr",
+        provider: "github",
+        type: "pr",
+        url: "https://github.com/acme/app/pull/2",
+      },
+    ],
+  };
+  f.setSnapshot(snap);
+  f.appear("reconnect", "key", undefined, initial);
+  await f.wait(imageContains("reconnect", "進行中"));
+  const held = f.history.length;
+  f.send("keyDown", "reconnect", "key");
+  await f.wait(imageContains("reconnect", "登録待ち"), held);
+  // 切断中にキー解放を失い、保存設定だけが変更された状況を再現する。
+  f.deviceEvent("deviceDidDisconnect");
+  f.setActionSettings("reconnect", {
+    ...initial,
+    workspace: { workspaceId: "b", workspaceName: "B" },
+  });
+  const start = f.history.length;
+  f.deviceEvent("deviceDidConnect");
+  await f.wait(
+    (m) => m.event === "getSettings" && m.context === "reconnect",
+    start,
+  );
+  await f.wait(imageContains("reconnect", "B"), start);
+  assert.deepEqual(f.switches(), []);
+  assert.deepEqual(f.executions(), []);
+  assert.equal(
+    f.history.slice(start).filter((m) => m.event === "setSettings").length,
+    0,
+  );
+  const press = f.history.length;
+  f.send("keyDown", "reconnect", "key");
+  f.send("keyUp", "reconnect", "key");
+  await f.wait(imageContains("reconnect", "移動中"), press);
+  await f.wait(imageContains("reconnect", "進行中"), f.history.length);
+  assert.equal(f.switches().at(-1)[3], "fresh-b");
+  const double = f.history.length;
+  for (let i = 0; i < 2; i++) {
+    f.send("keyDown", "reconnect", "key");
+    f.send("keyUp", "reconnect", "key");
+  }
+  await f.wait((m) => m.event === "openUrl", double);
+  assert.equal(f.history.filter((m) => m.event === "openUrl").length, 1);
+  await f.wait(imageContains("reconnect", "リンク"), double);
+  const hold = f.history.length;
+  f.send("keyDown", "reconnect", "key");
+  await f.wait((m) => m.event === "showOk" && m.context === "reconnect", hold);
+  f.send("keyUp", "reconnect", "key");
+  assert.equal(
+    f.history.findLast((m) => m.event === "setSettings").payload.workspace
+      .workspaceId,
+    "a",
+  );
+  assert.equal(f.switches().length, 1);
+  assert.deepEqual(f.executions(), []);
+});
+
+test("SDKの再接続中にページを離れたキーを設定応答で復活させない", async (t) => {
+  const f = await fixture(t);
+  f.appear("leave-reconnect", "key", undefined, {
+    workspaceButtonVersion: 1,
+    workspace: { workspaceId: "a", workspaceName: "A" },
+  });
+  await f.wait(imageContains("leave-reconnect", "進行中"));
+  f.deviceEvent("deviceDidDisconnect");
+  f.holdSettings();
+  const start = f.history.length;
+  f.deviceEvent("deviceDidConnect");
+  await f.wait(
+    (m) => m.event === "getSettings" && m.context === "leave-reconnect",
+    start,
+  );
+  f.send("willDisappear", "leave-reconnect", "key");
+  f.releaseSettings();
+  // 別キーの描画をバリアにして、遅い設定応答後まで処理を進める。
+  f.appear("visible", "key", undefined, { workspaceButtonVersion: 1 });
+  await f.wait(imageContains("visible", "未割当"), start);
+  assert.ok(
+    f.history
+      .slice(start)
+      .every((m) => m.event !== "setImage" || m.context !== "leave-reconnect"),
+  );
+  assert.deepEqual(f.switches(), []);
+  assert.deepEqual(f.executions(), []);
+});
+
+test("SDKの診断ログで入力・無視理由・ジェスチャー結果と機器接続を追え、設定本文やURLを記録しない", async (t) => {
+  const f = await fixture(t);
+  const privateUrl = "https://github.com/private/repo/pull/987";
+  f.appear("diagnostic", "key", undefined, {
+    workspaceButtonVersion: 1,
+    workspace: { workspaceId: "a", workspaceName: "PRIVATE-WORKSPACE-NAME" },
+    body: "PRIVATE-INPUT-BODY",
+    reference: { workspaceId: "a", key: "private", url: privateUrl },
+  });
+  await f.wait(imageContains("diagnostic", "進行中"));
+  assert.ok(
+    f.logs().includes('"event":"plugin.started"'),
+    "起動の診断ログがない",
+  );
+  const start = f.history.length;
+  f.send("keyDown", "diagnostic", "key");
+  f.send("keyUp", "diagnostic", "key");
+  await f.wait(imageContains("diagnostic", "移動中"), start);
+  await f.wait(imageContains("diagnostic", "進行中"), f.history.length);
+  const disconnect = f.history.length;
+  f.deviceEvent("deviceDidDisconnect");
+  f.send("keyDown", "diagnostic", "key");
+  f.deviceEvent("deviceDidConnect");
+  await f.wait(
+    (m) => m.event === "getSettings" && m.context === "diagnostic",
+    disconnect,
+  );
+  const log = f.logs();
+  for (const event of [
+    "plugin.started",
+    "device.disconnected",
+    "device.connected",
+    "workspace.key.down",
+    "workspace.key.up",
+    "workspace.input.ignored",
+    "workspace.gesture.started",
+    "workspace.gesture.finished",
+  ])
+    assert.ok(
+      log.includes(`"event":"${event}"`),
+      `${event} missing from ${log}`,
+    );
+  assert.match(log, /"reason":"unbound"/u);
+  for (const value of [
+    privateUrl,
+    "PRIVATE-WORKSPACE-NAME",
+    "PRIVATE-INPUT-BODY",
+  ])
+    assert.ok(!log.includes(value));
+});
+
 test("SDK長押しはAIなしの画面選択WSを登録し移動せず他ボタンに影響しない", async (t) => {
   const f = await fixture(t),
     initial = {
@@ -647,6 +885,60 @@ test("SDK長押しはAIなしの画面選択WSを登録し移動せず他ボタ�
       m.event === "sendToPropertyInspector" && m.payload.requestId === "mirror",
   );
   assert.equal(view.payload.workspace.workspaceId, "a");
+  assert.deepEqual(f.switches(), []);
+  assert.deepEqual(f.executions(), []);
+});
+
+test("SDKの操作IDで非同期CLI障害と元のキー操作を結び付け、セッションと記録順を復元できる", async (t) => {
+  const f = await fixture(t);
+  f.appear("trace-failure", "key", undefined, {
+    workspaceButtonVersion: 1,
+    workspace: { workspaceId: "a", workspaceName: "A" },
+  });
+  await f.wait(imageContains("trace-failure", "進行中"));
+  f.setSnapshot({ ...snapshot(["a", "b"]), testInvalidWorktreeResponse: true });
+  const start = f.history.length;
+  f.send("keyDown", "trace-failure", "key");
+  f.send("keyUp", "trace-failure", "key");
+  await f.wait(
+    (m) => m.event === "showAlert" && m.context === "trace-failure",
+    start,
+  );
+  const entries = f
+    .logs()
+    .split("\n")
+    .flatMap((line) => {
+      const at = line.indexOf('{"event":');
+      return at < 0 ? [] : [JSON.parse(line.slice(at))];
+    });
+  const operation = entries.find(
+    (e) => e.event === "workspace.gesture.started",
+  );
+  const failure = entries.find(
+    (e) =>
+      e.event === "orca.cli.failed" && e.operationId === operation.operationId,
+  );
+  assert.ok(failure, "CLI障害と操作IDが結び付いていない");
+  assert.equal(failure.actionId, "trace-failure");
+  assert.equal(failure.reason, "invalid-json");
+  assert.equal(failure.errorType, "SyntaxError");
+  assert.equal(failure.sessionId, operation.sessionId);
+  assert.ok(failure.errorFrames);
+  assert.ok(failure.cliRequestId);
+  assert.ok(
+    entries.some(
+      (e) =>
+        e.event === "orca.cli.started" &&
+        e.cliRequestId === failure.cliRequestId &&
+        e.operationId === operation.operationId,
+    ),
+  );
+  assert.ok(failure.sequence > operation.sequence);
+  assert.equal(
+    entries.find((e) => e.event === "workspace.gesture.failed").operationId,
+    operation.operationId,
+  );
+  assert.equal(new Set(entries.map((e) => e.sequence)).size, entries.length);
   assert.deepEqual(f.switches(), []);
   assert.deepEqual(f.executions(), []);
 });

@@ -1,5 +1,6 @@
 import streamDeck from "@elgato/streamdeck";
 import { AttentionButtons } from "./attention-buttons";
+import { logDiagnostic } from "./diagnostics";
 import { createCliRunner, OrcaClient } from "./orca/client";
 import { WorkspaceMonitor } from "./orca/monitor";
 import { readPluginSettings } from "./plugin-settings";
@@ -7,7 +8,9 @@ import type { WorkspaceKey } from "./workspace-buttons";
 import { WorkspaceStatusController } from "./workspace-status-controller";
 
 class WorkspaceService {
-  private readonly client = new OrcaClient(createCliRunner());
+  private readonly client = new OrcaClient(
+    createCliRunner(undefined, logDiagnostic),
+  );
   private readonly monitor = new WorkspaceMonitor(this.client);
   private navigationVersion = 0;
   private beginNavigation(): () => boolean {
@@ -21,6 +24,7 @@ class WorkspaceService {
     (url) => streamDeck.system.openUrl(url),
     (id, message) => this.report(id, message),
     () => this.beginNavigation(),
+    logDiagnostic,
   );
   private readonly attention = new AttentionButtons(
     this.monitor,

@@ -29,7 +29,7 @@ async function fixture(t, initialIds = ["A", "B"]) {
       },
     ],
   });
-  const sdk = { logger: { warn() {} }, ui: {}, settings: {} };
+  const sdk = { logger: { warn() {}, info() {} }, ui: {}, settings: {} };
   const module = { exports: {} };
   new Function(
     "module",
