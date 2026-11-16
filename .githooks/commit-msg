@@ -1,4 +1,0 @@
-#!/bin/sh
-set -eu
-
-node .githooks/check-commit-message.mjs "$1"

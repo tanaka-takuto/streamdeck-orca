@@ -26,7 +26,7 @@ Node.js 22.12.0 以上と npm、Git が必要です。リポジトリのルー�
 
 ```sh
 npm ci
-git config --local core.hooksPath .githooks
+git config --local core.hooksPath .githook
 ```
 
 `core.hooksPath` はクローンごとの設定です。新しくクローンした場合も上記のコマンドを実行してください。
@@ -223,10 +223,11 @@ Finderの「移動 → フォルダへ移動」にmacOSのパスを入力する�
 
 ## Git フック
 
-フックは `.githooks/` で管理します。
+フックは `.githook/` で管理します。
 
 - `pre-commit`: `npm run lint` でプロジェクト全体の JavaScript・TypeScript・JSON などを Biome で lint・整形チェックします。エラーがある場合はコミットを拒否します。ステージしていない変更もチェック対象です。
-- `commit-msg`: 自作の `.githooks/check-commit-message.mjs` で先頭行が [Conventional Commits](https://www.conventionalcommits.org/ja/v1.0.0/) 形式かを検証し、不正なメッセージを拒否します。検証スクリプトは Node.js の標準機能のみを使用し、commitlint などの追加ツールは使いません。
+- `pre-push`: `npm test` で全テストを実行し、一つでも失敗した場合はpushを拒否します。
+- `commit-msg`: 自作の `.githook/check-commit-message.mjs` で先頭行が [Conventional Commits](https://www.conventionalcommits.org/ja/v1.0.0/) 形式かを検証し、不正なメッセージを拒否します。検証スクリプトは Node.js の標準機能のみを使用し、commitlint などの追加ツールは使いません。
 
 コミットメッセージの形式は `type(scope): 説明` です。`scope` は省略できます。破壊的変更は `feat(api)!: 説明` のように `!` を付けて示せます。
 

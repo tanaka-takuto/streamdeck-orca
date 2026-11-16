@@ -16,7 +16,7 @@ const types = [
 
 if (process.argv.length !== 3) {
   console.error(
-    "使い方: node .githooks/check-commit-message.mjs <メッセージファイル>",
+    "使い方: node .githook/check-commit-message.mjs <メッセージファイル>",
   );
   process.exit(1);
 }

@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+# テストが一つでも失敗したらpushを止める。
+npm test

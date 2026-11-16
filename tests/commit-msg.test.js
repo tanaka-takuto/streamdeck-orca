@@ -11,15 +11,15 @@ function runHook(message) {
   try {
     // npm の依存をコピーせず、フック単体で実行できることも検証する。
     cpSync(
-      new URL("../.githooks", import.meta.url),
-      join(directory, ".githooks"),
+      new URL("../.githook", import.meta.url),
+      join(directory, ".githook"),
       {
         recursive: true,
       },
     );
     const messagePath = join(directory, "COMMIT_EDITMSG");
     writeFileSync(messagePath, message);
-    return spawnSync("sh", [".githooks/commit-msg", messagePath], {
+    return spawnSync("sh", [".githook/commit-msg", messagePath], {
       cwd: directory,
       encoding: "utf8",
     });

@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+
+node .githook/check-commit-message.mjs "$1"

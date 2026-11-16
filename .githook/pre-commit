@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+# Biomeでlintとformatの両方を検査し、不一致があればcommitを止める。
+npm run lint
